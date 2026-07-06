@@ -116,19 +116,15 @@ if is_authenticated():
         st.rerun()
 
 else:
-    # ── Non connecté : navigation réduite + bouton connexion ────────────
+    # ── Non connecté : la page de connexion s'affiche par défaut ─────
     mode = st.sidebar.radio(
         "Navigation",
-        ["🏠 Accueil", "❓ Aide"],
-        index=0,
+        ["🔐 Connexion", "🏠 Accueil", "❓ Aide"],
+        index=0,  # "🔐 Connexion" est en premier par défaut
     )
 
     st.sidebar.markdown("---")
     st.sidebar.info("🔒 Connectez-vous pour accéder à toutes les fonctionnalités.")
-
-    # Petit bouton "Se connecter" dans la sidebar
-    if st.sidebar.button("🔑 Se connecter / S'inscrire", use_container_width=True):
-        mode = "🔐 Connexion"
 
 # ── Routage des pages ─────────────────────────────────────────────────────
 if mode == "🏠 Accueil":
