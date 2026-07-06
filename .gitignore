@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Backend
+*.db
+instance/
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+*.coverage
+.tox/
+
+# Environment
+.env
+.env.local
+.env.production
+.env.development
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+.docker/
+
+# ChromaDB persistence
+chroma_db/
+
+# Service account (ne pas commiter)
+service_account.json
+
+# OpenCode
+opencode.jsonc
+agentic/
