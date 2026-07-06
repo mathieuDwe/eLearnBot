@@ -36,11 +36,40 @@ def show():
         )
         selected_doc = None
     else:
-        doc_names = [d["filename"] for d in documents]
-        selected_doc = st.selectbox(
+        # Afficher la liste des cours avec leur type
+        doc_options = []
+        for d in documents:
+            meta = d.get("metadata", {})
+            content_type = meta.get("content_type", "pdf")
+            icon = "🎬" if content_type == "mp4" else "📄"
+            duration = meta.get("duration_display", "")
+            label = f"{icon} {d['filename']}"
+            if duration:
+                label += f" ({duration})"
+            doc_options.append(label)
+
+        selected_label = st.selectbox(
             "Choisissez un cours",
-            doc_names,
+            doc_options,
         )
+
+        # Récupérer le filename depuis le label
+        selected_idx = doc_options.index(selected_label)
+        selected_doc = documents[selected_idx]["filename"]
+        selected_meta = documents[selected_idx].get("metadata", {})
+
+        # Afficher une info sur le type de cours sélectionné
+        content_type = selected_meta.get("content_type", "pdf")
+        if content_type == "mp4":
+            duration = selected_meta.get("duration_display", "")
+            st.caption(
+                f"🎬 Cours vidéo — Durée : {duration}"
+                if duration
+                else "🎬 Cours vidéo"
+            )
+        else:
+            st.caption("📄 Cours (PDF)")
+
         st.caption(f"{len(documents)} cours disponible(s)")
 
     # ── Zone de chat ───────────────────────────────────────────────────

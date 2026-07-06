@@ -138,8 +138,15 @@ class VectorStore:
                     seen[fname] = {
                         "filename": fname,
                         "chunks": 0,
+                        "metadata": {},
                     }
                 seen[fname]["chunks"] += 1
+                # Garder les métadonnées du premier chunk
+                if not seen[fname]["metadata"]:
+                    seen[fname]["metadata"] = {
+                        k: v for k, v in meta.items()
+                        if k not in ("filename", "chunk_index", "total_chunks")
+                    }
 
         return list(seen.values())
 

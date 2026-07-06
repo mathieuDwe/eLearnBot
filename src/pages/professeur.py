@@ -1,4 +1,4 @@
-"""👨‍🏫 Page Professeur — Upload et gestion des cours."""
+"""👨‍🏫 Page Professeur — Upload et gestion des cours (PDF + Vidéos MP4)."""
 
 import streamlit as st
 import tempfile
@@ -6,6 +6,7 @@ import os
 
 from core.auth import require_role, get_current_user
 from core.pdf_extractor import extract_text_from_pdf
+from core.video_processor import process_video
 from core.rag_pipeline import index_document, get_available_documents
 from integrations.google_drive import GoogleDriveClient
 
@@ -21,8 +22,9 @@ def show():
     user = get_current_user()
     st.title("👨‍🏫 Mode Professeur")
     st.markdown(
-        f"Bienvenue **{user['name']}** ! Uploader vos cours PDF. "
-        "Les élèves pourront ensuite poser des questions dessus."
+        f"Bienvenue **{user['name']}** ! "
+        "Uploader vos cours (PDF ou MP4). Les élèves pourront ensuite "
+        "poser des questions dessus."
     )
 
     # ── Onglets ────────────────────────────────────────────────────────
@@ -36,85 +38,117 @@ def show():
     with tab1:
         st.subheader("Uploader un nouveau cours")
 
-        uploaded_file = st.file_uploader(
-            "Choisissez un fichier PDF",
-            type=["pdf"],
-            help="Taille max : 10 Mo",
+        upload_type = st.radio(
+            "Type de fichier",
+            ["📄 PDF (document texte)", "🎬 MP4 (vidéo)"],
+            horizontal=True,
+            index=0,
         )
 
-        if uploaded_file is not None:
-            if uploaded_file.size > 10 * 1024 * 1024:
-                st.error("❌ Le fichier dépasse 10 Mo.")
-            else:
-                with st.spinner("⏳ Traitement en cours..."):
-                    # Sauvegarder le fichier temporairement
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix=".pdf"
-                    ) as tmp:
-                        tmp.write(uploaded_file.getvalue())
-                        tmp_path = tmp.name
+        # ── Upload PDF ─────────────────────────────────────────────────
+        if "PDF" in upload_type:
+            uploaded_file = st.file_uploader(
+                "Choisissez un fichier PDF",
+                type=["pdf"],
+                help="Taille max : 10 Mo. Les PDF scannés ne sont pas supportés.",
+                key="pdf_uploader",
+            )
 
-                    try:
-                        # 1. Extraire le texte
-                        text = extract_text_from_pdf(tmp_path)
+            if uploaded_file is not None:
+                if uploaded_file.size > 10 * 1024 * 1024:
+                    st.error("❌ Le fichier dépasse 10 Mo.")
+                else:
+                    with st.spinner("⏳ Traitement du PDF en cours..."):
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".pdf"
+                        ) as tmp:
+                            tmp.write(uploaded_file.getvalue())
+                            tmp_path = tmp.name
 
-                        if not text.strip():
-                            st.warning(
-                                "⚠️ Le PDF semble vide ou contient uniquement "
-                                "des images (OCR non supporté en v1)."
-                            )
-                        else:
-                            # 2. Uploader vers Google Drive
-                            try:
-                                drive = GoogleDriveClient()
-                                drive.upload_pdf(
-                                    tmp_path, uploaded_file.name
-                                )
-                                st.success(
-                                    f"✅ Fichier uploadé sur Google Drive"
-                                )
-                            except Exception as e:
+                        try:
+                            text = extract_text_from_pdf(tmp_path)
+
+                            if not text.strip():
                                 st.warning(
-                                    f"⚠️ Google Drive indisponible : {e}. "
-                                    "Le document sera indexé localement."
+                                    "⚠️ Le PDF semble vide ou contient uniquement "
+                                    "des images (OCR non supporté en v1)."
+                                )
+                            else:
+                                _index_and_store(
+                                    tmp_path, uploaded_file.name, text, "pdf"
+                                )
+                        except Exception as e:
+                            st.error(f"❌ Erreur lors du traitement : {e}")
+                        finally:
+                            os.unlink(tmp_path)
+
+        # ── Upload MP4 ─────────────────────────────────────────────────
+        else:
+            uploaded_file = st.file_uploader(
+                "Choisissez une vidéo MP4",
+                type=["mp4"],
+                help="Taille max : 200 Mo. La piste audio sera transcrite en texte.",
+                key="mp4_uploader",
+            )
+
+            if uploaded_file is not None:
+                if uploaded_file.size > 200 * 1024 * 1024:
+                    st.error("❌ Le fichier dépasse 200 Mo.")
+                else:
+                    # Progression
+                    progress_bar = st.progress(0, text="Préparation...")
+
+                    with st.spinner("⏳ Traitement de la vidéo en cours..."):
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".mp4"
+                        ) as tmp:
+                            tmp.write(uploaded_file.getvalue())
+                            tmp_path = tmp.name
+
+                        try:
+                            progress_bar.progress(20, text="📦 Fichier sauvegardé")
+
+                            # Transcrire avec Whisper
+                            progress_bar.progress(
+                                40, text="🎤 Transcription audio (Whisper)..."
+                            )
+                            result = process_video(tmp_path, language="fr")
+
+                            text = result["text"]
+
+                            if not text.strip():
+                                st.warning(
+                                    "⚠️ Aucun texte détecté dans la vidéo. "
+                                    "Vérifiez qu'il y a bien une piste audio."
+                                )
+                            else:
+                                duration = result.get("duration", 0)
+                                mins, secs = divmod(int(duration), 60)
+
+                                progress_bar.progress(
+                                    80, text="💾 Indexation..."
                                 )
 
-                            # 3. Indexer dans ChromaDB
-                            doc_id = index_document(
-                                text=text,
-                                filename=uploaded_file.name,
-                                metadata={
-                                    "source": "upload",
-                                    "size": uploaded_file.size,
-                                },
-                            )
-                            st.success(
-                                f"✅ **{uploaded_file.name}** indexé avec "
-                                f"succès ! (ID: {doc_id[:8]}...)"
-                            )
+                                _index_and_store(
+                                    tmp_path,
+                                    uploaded_file.name,
+                                    text,
+                                    "mp4",
+                                    metadata={
+                                        "duration": duration,
+                                        "duration_display": f"{mins}:{secs:02d}",
+                                        "language": result.get("language", "fr"),
+                                    },
+                                )
+                                progress_bar.progress(
+                                    100, text="✅ Terminé !"
+                                )
 
-                            st.info(
-                                "💡 Les élèves peuvent maintenant poser "
-                                "des questions sur ce cours."
-                            )
-                    except Exception as e:
-                        st.error(f"❌ Erreur lors du traitement : {e}")
-                    finally:
-                        os.unlink(tmp_path)
-
-        # ── Upload par URL YouTube (optionnel) ─────────────────────────
-        st.markdown("---")
-        st.subheader("🎥 Ajouter une vidéo YouTube")
-        st.info(
-            "Fonctionnalité à venir : ajoutez un lien YouTube et "
-            "les élèves pourront poser des questions sur la transcription."
-        )
-        youtube_url = st.text_input(
-            "Lien YouTube",
-            placeholder="https://www.youtube.com/watch?v=...",
-        )
-        if youtube_url and st.button("Ajouter la vidéo"):
-            st.info("🔧 Fonctionnalité en développement.")
+                        except Exception as e:
+                            st.error(f"❌ Erreur lors du traitement vidéo : {e}")
+                        finally:
+                            os.unlink(tmp_path)
+                            progress_bar.empty()
 
     # ── Onglet 2 : Mes cours ───────────────────────────────────────────
     with tab2:
@@ -123,18 +157,38 @@ def show():
         documents = get_available_documents()
 
         if not documents:
-            st.info("📭 Aucun cours pour le moment. Uploader un PDF dans l'onglet précédent.")
+            st.info(
+                "📭 Aucun cours pour le moment. Uploader un PDF ou une "
+                "vidéo MP4 dans l'onglet précédent."
+            )
         else:
             for doc in documents:
+                meta = doc.get("metadata", {})
+                content_type = meta.get("content_type", "pdf")
+                icon = "🎬" if content_type == "mp4" else "📄"
+
                 with st.container(border=True):
                     col1, col2 = st.columns([3, 1])
                     with col1:
-                        st.markdown(f"**📄 {doc['filename']}**")
-                        st.caption(f"🔢 {doc['chunks']} passages indexés")
+                        st.markdown(f"**{icon} {doc['filename']}**")
+                        chunks_info = f"🔢 {doc['chunks']} passages indexés"
+                        if content_type == "mp4":
+                            duration = meta.get("duration_display", "")
+                            chunks_info += (
+                                f" | 🎬 Durée : {duration}"
+                                if duration
+                                else ""
+                            )
+                        st.caption(chunks_info)
                     with col2:
-                        if st.button("🗑️ Supprimer", key=f"del_{doc['filename']}"):
+                        if st.button(
+                            "🗑️ Supprimer",
+                            key=f"del_{doc['filename']}",
+                        ):
                             from core.vector_store import get_vector_store
-                            deleted = get_vector_store().delete_document(doc['filename'])
+                            deleted = get_vector_store().delete_document(
+                                doc["filename"]
+                            )
                             st.success(f"✅ {deleted} passages supprimés.")
                             st.rerun()
 
@@ -160,3 +214,55 @@ def show():
 
         if st.button("💾 Sauvegarder les paramètres"):
             st.success("✅ Paramètres sauvegardés !")
+
+
+# ── Fonction utilitaire partagée ─────────────────────────────────────────
+
+
+def _index_and_store(
+    tmp_path: str,
+    filename: str,
+    text: str,
+    content_type: str,
+    metadata: dict = None,
+):
+    """Indexe le texte et tente l'upload vers Google Drive.
+
+    Args:
+        tmp_path: Chemin du fichier temporaire.
+        filename: Nom d'affichage.
+        text: Texte extrait/transcrit.
+        content_type: "pdf" ou "mp4".
+        metadata: Métadonnées supplémentaires.
+    """
+    metadata = metadata or {}
+    metadata["content_type"] = content_type
+    metadata["size"] = os.path.getsize(tmp_path)
+
+    # Upload Google Drive (silencieux en cas d'erreur)
+    try:
+        drive = GoogleDriveClient()
+        drive.upload_pdf(tmp_path, filename)
+        st.success("✅ Fichier sauvegardé sur Google Drive")
+    except Exception:
+        st.info("ℹ️ Fichier stocké localement (Google Drive non configuré)")
+
+    # Indexation ChromaDB
+    doc_id = index_document(
+        text=text,
+        filename=filename,
+        metadata=metadata,
+    )
+
+    if content_type == "mp4":
+        duration = metadata.get("duration_display", "")
+        st.success(
+            f"✅ **{filename}** transcrit et indexé avec succès ! "
+            f"(durée: {duration})"
+        )
+    else:
+        st.success(
+            f"✅ **{filename}** indexé avec succès ! (ID: {doc_id[:8]}...)"
+        )
+
+    st.info("💡 Les élèves peuvent maintenant poser des questions sur ce cours.")
