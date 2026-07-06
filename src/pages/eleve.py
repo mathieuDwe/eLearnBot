@@ -102,9 +102,12 @@ def show():
                         st.markdown(f"**Source {i}** : {src}")
 
     # Champ de saisie
+    has_content = len(documents) > 0
     if prompt := st.chat_input(
-        "Posez votre question sur le cours...",
-        disabled=(selected_doc is None),
+        "Posez votre question sur l'ensemble des contenus..."
+        if selected_doc is None
+        else "Posez votre question sur le cours sélectionné...",
+        disabled=(not has_content),
     ):
         # Ajouter la question
         st.session_state.messages.append(
