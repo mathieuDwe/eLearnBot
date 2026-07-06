@@ -3,7 +3,7 @@
 
 import streamlit as st
 
-from core.auth import init_session, is_authenticated, get_current_user, logout_user, require_role
+from core.auth import init_session, is_authenticated, get_current_user, logout_user
 
 # ── Configuration de la page ──────────────────────────────────────────────
 st.set_page_config(
@@ -57,6 +57,9 @@ st.markdown("""
         font-size: 0.9rem;
         text-align: center;
     }
+    .user-badge-admin {
+        border-left: 3px solid #FFD700;
+    }
     .user-badge-prof {
         border-left: 3px solid #4A90D9;
     }
@@ -79,8 +82,17 @@ if is_authenticated():
     user = get_current_user()
 
     # ── Badge utilisateur ───────────────────────────────────────────────
-    role_class = "user-badge-prof" if user["role"] == "professeur" else "user-badge-eleve"
-    role_icon = "👨‍🏫" if user["role"] == "professeur" else "👨‍🎓"
+    role_class = {
+        "admin": "user-badge-admin",
+        "professeur": "user-badge-prof",
+        "eleve": "user-badge-eleve",
+    }.get(user["role"], "user-badge-eleve")
+
+    role_icon = {
+        "admin": "👑",
+        "professeur": "👨‍🏫",
+        "eleve": "👨‍🎓",
+    }.get(user["role"], "👤")
 
     st.sidebar.markdown(
         f"<div class='user-badge {role_class}'>"
@@ -93,63 +105,23 @@ if is_authenticated():
 
     st.sidebar.markdown("---")
 
-    # ── Navigation selon le rôle ─────────────────────────────────────────
-    if user["role"] == "professeur":
-        # Le professeur voit toutes les pages
-        mode = st.sidebar.radio(
-            "Navigation",
-            ["🏠 Accueil", "👨‍🏫 Professeur", "👨‍🎓 Élève", "❓ Aide"],
-            index=0,
-        )
-    else:
-        # L'élève voit seulement Accueil, Élève et Aide
-        mode = st.sidebar.radio(
-            "Navigation",
-            ["🏠 Accueil", "👨‍🎓 Élève", "❓ Aide"],
-            index=0,
-        )
-
     # ── Bouton de déconnexion ───────────────────────────────────────────
-    st.sidebar.markdown("---")
     if st.sidebar.button("🚪 Déconnexion", use_container_width=True):
         logout_user()
         st.rerun()
 
-else:
-    # ── Non connecté : la page de connexion s'affiche par défaut ─────
-    mode = st.sidebar.radio(
-        "Navigation",
-        ["🔐 Connexion", "🏠 Accueil", "❓ Aide"],
-        index=0,  # "🔐 Connexion" est en premier par défaut
-    )
-
-    st.sidebar.markdown("---")
-    st.sidebar.info("🔒 Connectez-vous pour accéder à toutes les fonctionnalités.")
-
-# ── Routage des pages ─────────────────────────────────────────────────────
-if mode == "🏠 Accueil":
-    from pages.accueil import show
-    show()
-
-elif mode == "👨‍🏫 Professeur":
-    if require_role("professeur"):
+    # ── Routage direct selon le rôle ────────────────────────────────────
+    if user["role"] == "admin":
+        from pages.admin import show
+        show()
+    elif user["role"] == "professeur":
         from pages.professeur import show
         show()
     else:
-        st.error("⛔ Accès réservé aux professeurs.")
-        st.info("Connectez-vous avec un compte professeur pour accéder à cette page.")
-
-elif mode == "👨‍🎓 Élève":
-    if require_role("professeur", "eleve"):
         from pages.eleve import show
         show()
-    else:
-        st.error("⛔ Veuillez vous connecter pour accéder à cette page.")
 
-elif mode == "❓ Aide":
-    from pages.aide import show
-    show()
-
-elif mode == "🔐 Connexion":
+else:
+    # ── Non connecté : uniquement l'écran de connexion ─────────────────
     from pages.login import show
     show()

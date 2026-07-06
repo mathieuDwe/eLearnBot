@@ -7,6 +7,7 @@ from core.auth import (
     authenticate_user,
     login_user,
     ROLES,
+    ADMIN_SECRET_CODE,
 )
 
 
@@ -64,7 +65,7 @@ def show():
                         st.error(f"❌ {result['message']}")
 
         st.markdown("---")
-        st.caption("💡 **Compte de test** : créez-en un dans l'onglet Inscription.")
+        st.caption("💡 Créez un compte dans l'onglet Inscription.")
 
     # ── Inscription ─────────────────────────────────────────────────────
     with tab_inscription:
@@ -97,12 +98,25 @@ def show():
 
             role = st.selectbox(
                 "Vous êtes...",
-                options=ROLES,
+                options=("professeur", "eleve"),
                 format_func=lambda r: {
                     "professeur": "👨‍🏫 Professeur — Je crée et gère des cours",
                     "eleve": "👨‍🎓 Élève — Je consulte et pose des questions",
                 }.get(r, r),
             )
+
+            # ── Option admin (dépliée) ────────────────────────────────
+            with st.expander("👑 Administrateur (code requis)"):
+                st.markdown(
+                    "Réservé aux administrateurs. "
+                    "Le code secret est configuré dans le fichier `.env`."
+                )
+                admin_code = st.text_input(
+                    "Code administrateur",
+                    type="password",
+                    placeholder="Code secret admin",
+                    help="Demandez le code à votre administrateur.",
+                )
 
             submitted = st.form_submit_button(
                 "📝 Créer mon compte",
@@ -129,15 +143,29 @@ def show():
                     for err in errors:
                         st.error(f"❌ {err}")
                 else:
+                    # Déterminer le rôle final
+                    final_role = role
+                    if admin_code:
+                        if admin_code == ADMIN_SECRET_CODE:
+                            final_role = "admin"
+                        else:
+                            st.error("❌ Code administrateur invalide.")
+                            st.stop()
+
                     result = register_user(
                         email=email,
                         name=name.strip(),
                         password=password,
-                        role=role,
+                        role=final_role,
                     )
                     if result["success"]:
+                        role_label = {
+                            "admin": "👑 Administrateur",
+                            "professeur": "👨‍🏫 Professeur",
+                            "eleve": "👨‍🎓 Élève",
+                        }.get(final_role, final_role)
                         st.success(
-                            f"✅ Compte créé avec succès ! "
+                            f"✅ Compte **{role_label}** créé avec succès ! "
                             f"Vous pouvez maintenant vous connecter."
                         )
                         st.balloons()

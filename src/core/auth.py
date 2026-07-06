@@ -19,7 +19,10 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 
 # ── Modèle utilisateur ───────────────────────────────────────────────────
-ROLES = ("professeur", "eleve")
+ROLES = ("admin", "professeur", "eleve")
+
+# Code secret admin (depuis .env ou valeur par défaut)
+ADMIN_SECRET_CODE = os.getenv("ADMIN_SECRET_CODE", "admin123")
 
 
 def _load_users() -> list[dict]:
@@ -217,5 +220,81 @@ def get_user_display() -> str:
     user = get_current_user()
     if not user:
         return "Inconnu"
-    role_icon = "👨‍🏫" if user["role"] == "professeur" else "👨‍🎓"
+    role_icon = {
+        "admin": "👑",
+        "professeur": "👨‍🏫",
+        "eleve": "👨‍🎓",
+    }.get(user["role"], "👤")
     return f"{role_icon} {user['name']} ({user['role']})"
+
+
+# ── Fonctions Admin ───────────────────────────────────────────────────────
+
+
+def get_all_users() -> list[dict]:
+    """Retourne la liste de tous les utilisateurs (sans les hash)."""
+    users = _load_users()
+    return [
+        {k: v for k, v in u.items() if k != "password_hash"}
+        for u in users
+    ]
+
+
+def delete_user(email: str) -> dict:
+    """Supprime un utilisateur par son email.
+
+    Args:
+        email: Email de l'utilisateur à supprimer.
+
+    Returns:
+        dict avec success et message.
+    """
+    users = _load_users()
+    filtered = [u for u in users if u["email"] != email]
+
+    if len(filtered) == len(users):
+        return {"success": False, "message": "Utilisateur introuvable."}
+
+    _save_users(filtered)
+    return {"success": True, "message": f"Utilisateur {email} supprimé."}
+
+
+def update_user_role(email: str, new_role: str) -> dict:
+    """Change le rôle d'un utilisateur.
+
+    Args:
+        email: Email de l'utilisateur.
+        new_role: Nouveau rôle.
+
+    Returns:
+        dict avec success et message.
+    """
+    if new_role not in ROLES:
+        return {"success": False, "message": f"Rôle invalide : {new_role}"}
+
+    users = _load_users()
+    for u in users:
+        if u["email"] == email:
+            u["role"] = new_role
+            _save_users(users)
+            return {
+                "success": True,
+                "message": f"Rôle de {email} changé en {new_role}.",
+            }
+
+    return {"success": False, "message": "Utilisateur introuvable."}
+
+
+def count_users() -> dict:
+    """Compte les utilisateurs par rôle.
+
+    Returns:
+        dict avec total, admin, professeur, eleve.
+    """
+    users = _load_users()
+    counts = {"total": len(users), "admin": 0, "professeur": 0, "eleve": 0}
+    for u in users:
+        role = u.get("role", "eleve")
+        if role in counts:
+            counts[role] += 1
+    return counts
