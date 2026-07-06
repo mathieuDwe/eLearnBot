@@ -1,10 +1,10 @@
 """🔐 Authentification — Utilisateurs dans Supabase (table 'utilisateurs')."""
 
+import hashlib
 import os
 from datetime import datetime
 from typing import Optional
 
-import bcrypt
 import streamlit as st
 from supabase import create_client, Client
 
@@ -37,19 +37,22 @@ ADMIN_SECRET_CODE = os.getenv("ADMIN_SECRET_CODE", "admin123")
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _hash_password(password: str) -> str:
-    """Hash un mot de passe avec bcrypt."""
-    return bcrypt.hashpw(
-        password.encode("utf-8"), bcrypt.gensalt()
-    ).decode("utf-8")
+    """Hash un mot de passe avec SHA-256."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def _verify_password(password: str, stored: str) -> bool:
     """Vérifie un mot de passe.
 
-    Supporte deux formats :
-      - hash bcrypt (pour les anciens comptes)
-      - texte clair (pour les comptes créés manuellement dans Supabase)
+    Supporte trois formats :
+      - SHA-256 (nouveaux comptes)
+      - hash bcrypt (anciens comptes, préfixe $2b$)
+      - texte clair (compatibilité)
     """
+    sha = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    if sha == stored:
+        return True
+    # Fallback : bcrypt ou texte clair
     if stored.startswith("$2b$"):
         return bcrypt.checkpw(
             password.encode("utf-8"), stored.encode("utf-8")
@@ -124,7 +127,7 @@ def register_user(
     try:
         data = {
             "username": username,
-            "password": password,  # stocké en clair (comme les comptes Supabase existants)
+            "password": _hash_password(password),  # hash bcrypt
             "type": role,
         }
         client.table(_TABLE).insert(data).execute()
