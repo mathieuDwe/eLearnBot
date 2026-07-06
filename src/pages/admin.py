@@ -84,7 +84,6 @@ def show():
                 new_username = col_a1.text_input(
                     "Nom d'utilisateur *", placeholder="ex: jean.dupont"
                 )
-                new_name = col_a2.text_input("Nom *", placeholder="Jean Dupont")
                 col_b1, col_b2 = st.columns(2)
                 new_password = col_b1.text_input(
                     "Mot de passe *",
@@ -101,18 +100,18 @@ def show():
                 )
 
                 if submitted:
-                    if not new_username or not new_name or not new_password:
+                    if not new_username or not new_password:
                         st.error("Tous les champs sont requis.")
                     else:
                         result = admin_create_user(
                             username=new_username.strip(),
-                            name=new_name.strip(),
+                            name=new_username.strip(),  # username sert de nom
                             password=new_password,
                             role=new_role,
                         )
                         if result["success"]:
                             st.success(
-                                f"✅ Utilisateur {new_name} ({new_role}) créé avec succès !"
+                                f"✅ Utilisateur {new_username} ({new_role}) créé avec succès !"
                             )
                             st.rerun()
                         else:
@@ -125,7 +124,7 @@ def show():
         else:
             # En-tête du tableau
             cols = st.columns([3, 2, 1.5, 1, 1])
-            cols[0].markdown("**Nom**")
+            cols[0].markdown("**Utilisateur**")
             cols[1].markdown("**Identifiant**")
             cols[2].markdown("**Rôle**")
             cols[3].markdown("**Inscription**")
@@ -141,7 +140,7 @@ def show():
                     "professeur": "👨‍🏫",
                     "eleve": "👨‍🎓",
                 }.get(u["role"], "👤")
-                col1.markdown(f"{icon} {u['name']}")
+                col1.markdown(f"{icon} `{u['username']}`")
 
                 col2.markdown(f"`{u['username']}`")
 

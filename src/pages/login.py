@@ -1,4 +1,4 @@
-"""🔐 Page de connexion et d'inscription."""
+"""🔐 Page de connexion et d'inscription (via Supabase)."""
 
 import streamlit as st
 
@@ -72,15 +72,10 @@ def show():
         st.subheader("Créer un compte")
 
         with st.form("form_inscription"):
-            name = st.text_input(
-                "Nom d'affichage",
-                placeholder="ex: Jean Dupont",
-            )
-
             username = st.text_input(
                 "Nom d'utilisateur",
                 placeholder="ex: jean.dupont",
-                help="Identifiant unique pour vous connecter (2-30 car., lettres, chiffres, tirets).",
+                help="Identifiant unique (2-30 car., lettres, chiffres, tirets).",
             )
 
             col1, col2 = st.columns(2)
@@ -97,9 +92,9 @@ def show():
                     placeholder="Retaper le mot de passe",
                 )
 
-            role = st.selectbox(
+            user_type = st.selectbox(
                 "Vous êtes...",
-                options=("professeur", "eleve"),
+                options=("eleve", "professeur"),
                 format_func=lambda r: {
                     "professeur": "👨‍🏫 Professeur — Je crée et gère des cours",
                     "eleve": "👨‍🎓 Élève — Je consulte et pose des questions",
@@ -125,10 +120,7 @@ def show():
             )
 
             if submitted:
-                # Validation
                 errors = []
-                if not name.strip():
-                    errors.append("Le nom est requis.")
                 if not username:
                     errors.append("Le nom d'utilisateur est requis.")
                 if not password:
@@ -144,8 +136,7 @@ def show():
                     for err in errors:
                         st.error(f"❌ {err}")
                 else:
-                    # Déterminer le rôle final
-                    final_role = role
+                    final_role = user_type
                     if admin_code:
                         if admin_code == ADMIN_SECRET_CODE:
                             final_role = "admin"
@@ -155,7 +146,7 @@ def show():
 
                     result = register_user(
                         username=username,
-                        name=name.strip(),
+                        name=username,  # Pas de colonne 'name' → username
                         password=password,
                         role=final_role,
                     )
@@ -174,6 +165,4 @@ def show():
                         st.error(f"❌ {result['message']}")
 
         st.markdown("---")
-        st.caption(
-            "💡 Les mots de passe sont hachés avec bcrypt."
-        )
+        st.caption("💡 Les mots de passe sont hachés avec bcrypt.")
