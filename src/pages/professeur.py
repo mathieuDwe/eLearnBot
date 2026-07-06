@@ -4,17 +4,25 @@ import streamlit as st
 import tempfile
 import os
 
+from core.auth import require_role, get_current_user
 from core.pdf_extractor import extract_text_from_pdf
-from core.rag_pipeline import index_document
+from core.rag_pipeline import index_document, get_available_documents
 from integrations.google_drive import GoogleDriveClient
 
 
 def show():
     """Affiche l'interface professeur."""
+    # Vérification du rôle
+    if not require_role("professeur"):
+        st.error("⛔ Accès réservé aux professeurs.")
+        st.info("Connectez-vous avec un compte professeur.")
+        return
+
+    user = get_current_user()
     st.title("👨‍🏫 Mode Professeur")
     st.markdown(
-        "Uploader vos cours PDF. Les élèves pourront ensuite "
-        "poser des questions dessus."
+        f"Bienvenue **{user['name']}** ! Uploader vos cours PDF. "
+        "Les élèves pourront ensuite poser des questions dessus."
     )
 
     # ── Onglets ────────────────────────────────────────────────────────
@@ -112,15 +120,35 @@ def show():
     with tab2:
         st.subheader("Cours indexés")
 
-        # TODO: Lister les documents depuis ChromaDB
-        st.info("📭 Aucun cours pour le moment. Uploader un PDF dans l'onglet précédent.")
+        documents = get_available_documents()
+
+        if not documents:
+            st.info("📭 Aucun cours pour le moment. Uploader un PDF dans l'onglet précédent.")
+        else:
+            for doc in documents:
+                with st.container(border=True):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"**📄 {doc['filename']}**")
+                        st.caption(f"🔢 {doc['chunks']} passages indexés")
+                    with col2:
+                        if st.button("🗑️ Supprimer", key=f"del_{doc['filename']}"):
+                            from core.vector_store import get_vector_store
+                            deleted = get_vector_store().delete_document(doc['filename'])
+                            st.success(f"✅ {deleted} passages supprimés.")
+                            st.rerun()
 
     # ── Onglet 3 : Paramètres ──────────────────────────────────────────
     with tab3:
         st.subheader("Paramètres du compte")
 
+        st.markdown(f"**Email** : {user['email']}")
+        st.markdown(f"**Rôle** : 👨‍🏫 Professeur")
+
+        st.markdown("---")
         st.text_input(
-            "Nom du professeur",
+            "Nom d'affichage",
+            value=user["name"],
             placeholder="Votre nom",
         )
 

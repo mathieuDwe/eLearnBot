@@ -2,15 +2,22 @@
 
 import streamlit as st
 
+from core.auth import require_role, get_current_user
 from core.rag_pipeline import answer_question, get_available_documents
 
 
 def show():
     """Affiche l'interface élève."""
+    # Vérification du rôle
+    if not require_role("professeur", "eleve"):
+        st.error("⛔ Veuillez vous connecter pour accéder à cette page.")
+        return
+
+    user = get_current_user()
     st.title("👨‍🎓 Mode Élève")
     st.markdown(
-        "Posez une question sur un cours. Le chatbot vous répondra "
-        "en citant les passages sources."
+        f"Bienvenue **{user['name']}** ! Posez une question sur un cours. "
+        "Le chatbot vous répondra en citant les passages sources."
     )
 
     # ── Initialisation de l'historique ─────────────────────────────────

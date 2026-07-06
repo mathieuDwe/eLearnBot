@@ -53,6 +53,9 @@ logs/
 # ChromaDB persistence
 chroma_db/
 
+# User data (local JSON storage)
+data/users.json
+
 # Service account (ne pas commiter)
 service_account.json
 
