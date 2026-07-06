@@ -36,12 +36,20 @@ def show():
         )
         selected_doc = None
     else:
+        # Option : tous les contenus (cours + juridique)
+        doc_options = ["🌐 Tous les contenus (cours + juridique)"]
+
         # Afficher la liste des cours avec leur type
-        doc_options = []
         for d in documents:
             meta = d.get("metadata", {})
             content_type = meta.get("content_type", "pdf")
-            icon = "🎬" if content_type == "mp4" else "📄"
+            doc_type = meta.get("type", "")
+            if doc_type == "legal":
+                icon = "⚖️"
+            elif content_type == "mp4":
+                icon = "🎬"
+            else:
+                icon = "📄"
             duration = meta.get("duration_display", "")
             label = f"{icon} {d['filename']}"
             if duration:
@@ -49,28 +57,36 @@ def show():
             doc_options.append(label)
 
         selected_label = st.selectbox(
-            "Choisissez un cours",
+            "Choisissez un cours (ou 'Tous' pour chercher partout)",
             doc_options,
         )
 
         # Récupérer le filename depuis le label
         selected_idx = doc_options.index(selected_label)
-        selected_doc = documents[selected_idx]["filename"]
-        selected_meta = documents[selected_idx].get("metadata", {})
-
-        # Afficher une info sur le type de cours sélectionné
-        content_type = selected_meta.get("content_type", "pdf")
-        if content_type == "mp4":
-            duration = selected_meta.get("duration_display", "")
-            st.caption(
-                f"🎬 Cours vidéo — Durée : {duration}"
-                if duration
-                else "🎬 Cours vidéo"
-            )
+        if selected_idx == 0:
+            selected_doc = None  # Tous les contenus
+            st.caption("🌐 Recherche dans tous les contenus (cours + articles juridiques)")
         else:
-            st.caption("📄 Cours (PDF)")
+            doc_idx = selected_idx - 1  # décalage à cause de l'option "Tous"
+            selected_doc = documents[doc_idx]["filename"]
+            selected_meta = documents[doc_idx].get("metadata", {})
 
-        st.caption(f"{len(documents)} cours disponible(s)")
+            # Afficher une info sur le type de cours sélectionné
+            doc_type = selected_meta.get("type", "")
+            content_type = selected_meta.get("content_type", "pdf")
+            if doc_type == "legal":
+                st.caption("⚖️ Article juridique")
+            elif content_type == "mp4":
+                duration = selected_meta.get("duration_display", "")
+                st.caption(
+                    f"🎬 Cours vidéo — Durée : {duration}"
+                    if duration
+                    else "🎬 Cours vidéo"
+                )
+            else:
+                st.caption("📄 Cours (PDF)")
+
+        st.caption(f"{len(documents)} document(s) disponible(s)")
 
     # ── Zone de chat ───────────────────────────────────────────────────
     st.markdown("---")
@@ -99,7 +115,8 @@ def show():
 
         # Générer la réponse
         with st.chat_message("assistant"):
-            with st.spinner("🔍 Recherche dans les cours..."):
+            scope = "tous les contenus" if selected_doc is None else "le cours"
+            with st.spinner(f"🔍 Recherche dans {scope}..."):
                 try:
                     result = answer_question(
                         question=prompt,

@@ -137,7 +137,6 @@ def show():
 
     # ── Onglet 3 : Chat juridique ──────────────────────────────────────
     with tabs[2]:
-        # Récupérer les documents juridiques disponibles
         all_docs = get_available_documents()
         legal_docs = [d for d in all_docs if d.get("metadata", {}).get("type") == "legal"]
 
@@ -148,50 +147,60 @@ def show():
                 "pour indexer des articles."
             )
         else:
-            st.markdown(f"📚 **{len(legal_docs)} article(s) juridique(s) indexé(s)**")
+            total = len(all_docs)
+            legal = len(legal_docs)
+            courses = total - legal
+            st.markdown(
+                f"📚 **{legal} article(s) juridique(s)** indexé(s) "
+                f"— {courses} cours disponible(s)"
+            )
 
-            # Sélection d'un article
-            doc_names = [d["filename"] for d in legal_docs]
+            # Filtre : tous (cours + juridique) ou un article spécifique
+            doc_names = [d["filename"] for d in all_docs]
+            filter_options = ["🌐 Tous (cours + juridique)"] + [
+                d["filename"] for d in legal_docs
+            ]
             selected = st.selectbox(
-                "Filtrer par article (ou laissez 'Tous')",
-                ["Tous les articles"] + doc_names,
+                "Filtrer la recherche",
+                filter_options,
                 key="legal_doc_filter",
             )
 
-            # Chat
             st.markdown("---")
-            st.markdown("### 💬 Posez votre question juridique")
+            st.markdown("### 💬 Posez votre question")
+            st.caption(
+                "L'agent cherche la réponse à la fois dans les cours et dans "
+                "les articles juridiques indexés."
+            )
 
-            # Initialiser l'historique
             if "legal_chat_history" not in st.session_state:
                 st.session_state.legal_chat_history = []
 
-            # Afficher l'historique
             for msg in st.session_state.legal_chat_history:
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
-            # Input
             question = st.chat_input(
                 "Ex: Que dit l'article 1240 du Code civil ?"
             )
             if question:
-                # Afficher la question
                 st.session_state.legal_chat_history.append(
                     {"role": "user", "content": question}
                 )
                 with st.chat_message("user"):
                     st.markdown(question)
 
-                # Réponse
                 with st.chat_message("assistant"):
-                    with st.spinner("Recherche dans les articles juridiques..."):
-                        doc_filter = selected if selected != "Tous les articles" else None
+                    with st.spinner("Recherche dans tous les contenus..."):
+                        doc_filter = (
+                            selected if selected != "🌐 Tous (cours + juridique)"
+                            else None
+                        )
                         result = answer_question(question, document_name=doc_filter)
 
                     st.markdown(result["answer"])
                     if result["sources"]:
-                        with st.expander("📖 Sources juridiques"):
+                        with st.expander("📖 Sources"):
                             for s in result["sources"]:
                                 st.markdown(f"- {s}")
 
