@@ -3,12 +3,24 @@
 import streamlit as st
 import tempfile
 import os
+from datetime import datetime
 
 from core.auth import require_role, get_current_user
 from core.pdf_extractor import extract_text_from_pdf
 from core.video_processor import process_video
 from core.rag_pipeline import index_document, get_available_documents
-from integrations.google_drive import GoogleDriveClient
+from core.vector_store import CHROMA_DB_PATH
+from integrations.supabase_storage import SupabaseStorage
+
+
+def _format_size(size_bytes: int) -> str:
+    """Formate une taille en bytes vers une lisible (Ko, Mo)."""
+    if size_bytes < 1024:
+        return f"{size_bytes} o"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} Ko"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} Mo"
 
 
 def show():
@@ -196,7 +208,7 @@ def show():
     with tab3:
         st.subheader("Paramètres du compte")
 
-        st.markdown(f"**Email** : {user['email']}")
+        st.markdown(f"**Identifiant** : `{user['username']}`")
         st.markdown(f"**Rôle** : 👨‍🏫 Professeur")
 
         st.markdown("---")
@@ -215,6 +227,35 @@ def show():
         if st.button("💾 Sauvegarder les paramètres"):
             st.success("✅ Paramètres sauvegardés !")
 
+        # ── Informations stockage ───────────────────────────────────────
+        st.markdown("---")
+        with st.expander("💾 Informations sur le stockage", expanded=True):
+            chroma_path = os.path.abspath(CHROMA_DB_PATH)
+            chroma_size = 0
+            for dirpath, _, filenames in os.walk(chroma_path):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    chroma_size += os.path.getsize(fp)
+
+            docs = get_available_documents()
+            total_chunks = sum(d.get("chunks", 0) for d in docs)
+
+            st.markdown(f"""
+            | Élément | Emplacement / Valeur |
+            |---|---|
+            | 🗄️ **Base vectorielle** | `{chroma_path}/` |
+            | 💾 **Taille sur disque** | `{_format_size(chroma_size)}` |
+            | 📚 **Cours indexés** | `{len(docs)}` |
+            | 🔢 **Total passages** | `{total_chunks}` |
+            | 🗑️ **Fichiers temporaires** | Supprimés après indexation |
+            """)
+
+            st.caption(
+                "💡 Les embeddings restent persistés dans ChromaDB. "
+                "Tant que la base n'est pas supprimée, les élèves "
+                "peuvent interroger les cours."
+            )
+
 
 # ── Fonction utilitaire partagée ─────────────────────────────────────────
 
@@ -226,7 +267,7 @@ def _index_and_store(
     content_type: str,
     metadata: dict = None,
 ):
-    """Indexe le texte et tente l'upload vers Google Drive.
+    """Indexe le texte dans ChromaDB.
 
     Args:
         tmp_path: Chemin du fichier temporaire.
@@ -239,13 +280,25 @@ def _index_and_store(
     metadata["content_type"] = content_type
     metadata["size"] = os.path.getsize(tmp_path)
 
-    # Upload Google Drive (silencieux en cas d'erreur)
+    # ── Upload vers Supabase ──────────────────────────────────────────
     try:
-        drive = GoogleDriveClient()
-        drive.upload_pdf(tmp_path, filename)
-        st.success("✅ Fichier sauvegardé sur Google Drive")
-    except Exception:
-        st.info("ℹ️ Fichier stocké localement (Google Drive non configuré)")
+        storage = SupabaseStorage()
+        public_url = storage.upload_file(tmp_path, filename)
+        metadata["storage_url"] = public_url
+        st.success(f"☁️ Fichier sauvegardé sur Supabase Storage")
+    except Exception as e:
+        st.warning(f"⚠️ Supabase : {e}")
+
+    # ── Logs de stockage ────────────────────────────────────────────
+    abs_tmp = os.path.abspath(tmp_path)
+    chroma_abs = os.path.abspath(CHROMA_DB_PATH)
+    st.info(
+        f"📂 **Fichier temporaire :** `{abs_tmp}`\n\n"
+        f"🗑️ Sera supprimé après indexation.\n\n"
+        f"💾 **Base vectorielle :** `{chroma_abs}/`\n\n"
+        f"📦 Les embeddings restent persistés dans ChromaDB "
+        f"(même après suppression du fichier temporaire)."
+    )
 
     # Indexation ChromaDB
     doc_id = index_document(

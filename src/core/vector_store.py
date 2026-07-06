@@ -6,6 +6,7 @@ from typing import Optional
 
 import chromadb
 from chromadb.config import Settings
+from chromadb.errors import NotFoundError
 
 from core.embeddings import EmbeddingGenerator
 
@@ -39,7 +40,7 @@ class VectorStore:
         # Créer ou récupérer la collection
         try:
             self.collection = self.client.get_collection(COLLECTION_NAME)
-        except ValueError:
+        except NotFoundError:
             self.collection = self.client.create_collection(
                 COLLECTION_NAME,
                 metadata={"hnsw:space": "cosine"},

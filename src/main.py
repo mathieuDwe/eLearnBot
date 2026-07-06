@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """🚀 eLearnBot — Point d'entrée de l'application Streamlit."""
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import streamlit as st
 
 from core.auth import init_session, is_authenticated, get_current_user, logout_user
@@ -97,7 +101,7 @@ if is_authenticated():
     st.sidebar.markdown(
         f"<div class='user-badge {role_class}'>"
         f"  <strong>{role_icon} {user['name']}</strong><br>"
-        f"  <small>{user['email']}</small><br>"
+        f"  <small>@{user['username']}</small><br>"
         f"  <small>Rôle : {user['role']}</small>"
         f"</div>",
         unsafe_allow_html=True,
@@ -110,15 +114,66 @@ if is_authenticated():
         logout_user()
         st.rerun()
 
-    # ── Routage direct selon le rôle ────────────────────────────────────
-    if user["role"] == "admin":
+    # ── Navigation ────────────────────────────────────────────────────
+    # Définir les pages disponibles selon le rôle
+    role = user["role"]
+
+    pages_config = {
+        "admin": [
+            ("🏠", "Dashboard", "admin"),
+            ("👨‍🏫", "Professeur", "professeur"),
+            ("👨‍🎓", "Élève", "eleve"),
+            ("⚖️", "Légifrance", "legifrance"),
+            ("❓", "Aide", "aide"),
+        ],
+        "professeur": [
+            ("👨‍🏫", "Tableau de bord", "professeur"),
+            ("⚖️", "Légifrance", "legifrance"),
+            ("❓", "Aide", "aide"),
+        ],
+        "eleve": [
+            ("👨‍🎓", "Tableau de bord", "eleve"),
+            ("⚖️", "Légifrance", "legifrance"),
+            ("❓", "Aide", "aide"),
+        ],
+    }
+
+    # Session : mémoriser la page active
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = pages_config[role][0][2]
+
+    # Sidebar : liens de navigation
+    st.sidebar.markdown("### 📍 Navigation")
+    for icon, label, page_id in pages_config[role]:
+        active = st.session_state.current_page == page_id
+        btn_style = "primary" if active else "secondary"
+        if st.sidebar.button(
+            f"{icon} {label}",
+            use_container_width=True,
+            type=btn_style,
+            key=f"nav_{page_id}",
+        ):
+            st.session_state.current_page = page_id
+            st.rerun()
+
+    st.sidebar.markdown("---")
+
+    # Routage selon la page sélectionnée
+    page = st.session_state.current_page
+    if page == "admin":
         from pages.admin import show
         show()
-    elif user["role"] == "professeur":
+    elif page == "professeur":
         from pages.professeur import show
         show()
-    else:
+    elif page == "eleve":
         from pages.eleve import show
+        show()
+    elif page == "legifrance":
+        from pages.legifrance import show
+        show()
+    elif page == "aide":
+        from pages.aide import show
         show()
 
 else:

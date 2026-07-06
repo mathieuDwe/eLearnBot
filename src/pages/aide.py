@@ -40,40 +40,40 @@ def show():
     with st.expander("📄 Quels formats sont supportés ?"):
         st.markdown("""
         - **PDF** : fichiers texte (pas de PDF scannés)
-        - **YouTube** : liens vidéo (bientôt disponible)
-        - Taille max : **10 Mo** par fichier
+        - **MP4** : vidéos avec transcription automatique
+        - Taille max : **10 Mo** par PDF, **200 Mo** par vidéo
         """)
 
     with st.expander("🔒 Mes données sont-elles privées ?"):
         st.markdown("""
-        Oui ! Toutes les données sont stockées sur votre propre
-        **Google Drive**. L'application ne partage rien avec des tiers.
+        Oui ! Les cours sont stockés localement et indexés dans une base
+        vectorielle (ChromaDB). Aucune donnée n'est partagée avec des tiers.
         Les embeddings sont générés localement.
         """)
 
-    with st.expander("🎥 Puis-je ajouter des vidéos YouTube ?"):
+    with st.expander("🎥 Comment ajouter une vidéo ?"):
         st.markdown("""
-        Cette fonctionnalité est en développement. Vous pourrez bientôt
-        ajouter un lien YouTube et les élèves pourront poser des questions
-        sur la transcription de la vidéo.
+        Uploadez un fichier **MP4** directement depuis l'interface
+        Professeur. L'audio est extrait et transcrit automatiquement
+        (Whisper) pour être indexé dans la base de connaissances.
         """)
 
     with st.expander("⚠️ Limitations connues"):
         st.markdown("""
         - **Pas d'OCR** : les PDF scannés ne sont pas supportés en v1
-        - **Taille max** : 10 Mo par PDF
+        - **Taille max** : 10 Mo par PDF, 200 Mo par vidéo
         - **Rate limit** : les APIs LLM gratuites ont des limites
           (ex: 30 req/min avec Groq)
-        - **YouTube** : seuls les liens sont stockés, pas de transcription
+        - **Vidéos longues** : la transcription peut prendre plusieurs minutes
         """)
 
     with st.expander("🛠️ Configuration technique"):
         st.markdown("""
         **Stack technique :**
         - **Frontend** : Streamlit
-        - **Backend** : Python / FastAPI
+        - **Backend** : Python
         - **Vector Store** : ChromaDB
-        - **Stockage** : Google Drive
+        - **Transcription** : Whisper (local)
         - **LLM** : Groq / Gemini / OpenAI
 
         **Code source :** [GitHub](https://github.com) (bientôt disponible)

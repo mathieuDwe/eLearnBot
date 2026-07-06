@@ -22,9 +22,9 @@ def _get_llm_client():
         from openai import OpenAI
         return OpenAI(api_key=openai_key), "openai"
     elif gemini_key:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        return genai, "gemini"
+        from google import genai as genai_client
+        genai_client.Client(api_key=gemini_key)
+        return genai_client, "gemini"
     else:
         return None, "none"
 
@@ -82,8 +82,11 @@ def _call_llm(prompt: str) -> str:
             return completion.choices[0].message.content
 
         elif provider == "gemini":
-            model_instance = client.GenerativeModel(model)
-            response = model_instance.generate_content(prompt)
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config={"temperature": 0.3, "max_output_tokens": 1024},
+            )
             return response.text
 
     except Exception as e:

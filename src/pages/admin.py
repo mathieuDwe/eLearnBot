@@ -10,6 +10,7 @@ from core.auth import (
     delete_user,
     update_user_role,
     count_users,
+    admin_create_user,
     ROLES,
 )
 from core.rag_pipeline import get_available_documents
@@ -76,6 +77,47 @@ def show():
     with tab2:
         st.subheader("👥 Gestion des utilisateurs")
 
+        # ── Formulaire d'ajout ────────────────────────────────────
+        with st.expander("➕ Ajouter un utilisateur", expanded=False):
+            with st.form("add_user_form", clear_on_submit=True):
+                col_a1, col_a2 = st.columns(2)
+                new_username = col_a1.text_input(
+                    "Nom d'utilisateur *", placeholder="ex: jean.dupont"
+                )
+                new_name = col_a2.text_input("Nom *", placeholder="Jean Dupont")
+                col_b1, col_b2 = st.columns(2)
+                new_password = col_b1.text_input(
+                    "Mot de passe *",
+                    type="password",
+                    placeholder="Au moins 6 caractères",
+                )
+                new_role = col_b2.selectbox(
+                    "Rôle *", options=ROLES, index=2
+                )
+                submitted = st.form_submit_button(
+                    "✅ Créer l'utilisateur",
+                    use_container_width=True,
+                    type="primary",
+                )
+
+                if submitted:
+                    if not new_username or not new_name or not new_password:
+                        st.error("Tous les champs sont requis.")
+                    else:
+                        result = admin_create_user(
+                            username=new_username.strip(),
+                            name=new_name.strip(),
+                            password=new_password,
+                            role=new_role,
+                        )
+                        if result["success"]:
+                            st.success(
+                                f"✅ Utilisateur {new_name} ({new_role}) créé avec succès !"
+                            )
+                            st.rerun()
+                        else:
+                            st.error(result["message"])
+
         users = get_all_users()
 
         if not users:
@@ -84,7 +126,7 @@ def show():
             # En-tête du tableau
             cols = st.columns([3, 2, 1.5, 1, 1])
             cols[0].markdown("**Nom**")
-            cols[1].markdown("**Email**")
+            cols[1].markdown("**Identifiant**")
             cols[2].markdown("**Rôle**")
             cols[3].markdown("**Inscription**")
             cols[4].markdown("**Actions**")
@@ -101,7 +143,7 @@ def show():
                 }.get(u["role"], "👤")
                 col1.markdown(f"{icon} {u['name']}")
 
-                col2.markdown(f"`{u['email']}`")
+                col2.markdown(f"`{u['username']}`")
 
                 # Sélecteur de rôle
                 current_role = u["role"]
@@ -110,11 +152,11 @@ def show():
                     "Rôle",
                     ROLES,
                     index=role_idx,
-                    key=f"role_{u['email']}",
+                    key=f"role_{u['username']}",
                     label_visibility="collapsed",
                 )
                 if new_role != current_role:
-                    result = update_user_role(u["email"], new_role)
+                    result = update_user_role(u["username"], new_role)
                     if result["success"]:
                         st.success(result["message"])
                         st.rerun()
@@ -124,13 +166,13 @@ def show():
                 col4.markdown(created)
 
                 # Bouton supprimer
-                if u["email"] != user["email"]:  # Ne pas pouvoir se supprimer soi-même
+                if u["username"] != user["username"]:  # Ne pas pouvoir se supprimer soi-même
                     if col5.button(
                         "🗑️",
-                        key=f"del_{u['email']}",
-                        help=f"Supprimer {u['email']}",
+                        key=f"del_{u['username']}",
+                        help=f"Supprimer {u['username']}",
                     ):
-                        result = delete_user(u["email"])
+                        result = delete_user(u["username"])
                         if result["success"]:
                             st.success(result["message"])
                             st.rerun()

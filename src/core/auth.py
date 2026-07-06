@@ -2,7 +2,6 @@
 
 import json
 import os
-import re
 from datetime import datetime
 from typing import Optional
 
@@ -53,17 +52,20 @@ def _verify_password(password: str, password_hash: str) -> bool:
     )
 
 
-def _validate_email(email: str) -> bool:
-    """Valide le format d'un email."""
-    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    return re.match(pattern, email) is not None
+def _validate_username(username: str) -> bool:
+    """Valide le format d'un nom d'utilisateur (2-30 car., lettres, chiffres, tirets)."""
+    if len(username) < 2 or len(username) > 30:
+        return False
+    # Caractères autorisés : lettres, chiffres, tirets, underscores, points
+    import re
+    return re.match(r"^[a-zA-Z0-9_.-]+$", username) is not None
 
 
 # ── API publique ─────────────────────────────────────────────────────────
 
 
 def register_user(
-    email: str,
+    username: str,
     name: str,
     password: str,
     role: str,
@@ -71,24 +73,30 @@ def register_user(
     """Inscrit un nouvel utilisateur.
 
     Args:
-        email: Adresse email.
+        username: Nom d'utilisateur (identifiant de connexion).
         name: Nom d'affichage.
         password: Mot de passe (>= 6 caractères).
-        role: "professeur" ou "eleve".
+        role: "admin", "professeur" ou "eleve".
 
     Returns:
         dict avec "success" (bool) et "message" (str) ou "user" (dict).
 
     Exemple:
-        {"success": True, "user": {"email": "...", "name": "...", "role": "professeur"}}
-        {"success": False, "message": "Email déjà utilisé."}
+        {"success": True, "user": {"username": "...", "name": "...", "role": "professeur"}}
+        {"success": False, "message": "Nom d'utilisateur déjà utilisé."}
     """
     # Validation
     if role not in ROLES:
         return {"success": False, "message": f"Rôle invalide : {role}"}
 
-    if not _validate_email(email):
-        return {"success": False, "message": "Format d'email invalide."}
+    if not _validate_username(username):
+        return {
+            "success": False,
+            "message": (
+                "Nom d'utilisateur invalide (2-30 caractères, "
+                "lettres, chiffres, tirets et underscores uniquement)."
+            ),
+        }
 
     if len(password) < 6:
         return {
@@ -99,14 +107,17 @@ def register_user(
     if not name.strip():
         return {"success": False, "message": "Le nom est requis."}
 
-    # Vérifier si l'email existe déjà
+    # Vérifier si le nom d'utilisateur existe déjà
     users = _load_users()
-    if any(u["email"] == email for u in users):
-        return {"success": False, "message": "Cet email est déjà utilisé."}
+    if any(u["username"] == username for u in users):
+        return {
+            "success": False,
+            "message": "Ce nom d'utilisateur est déjà pris.",
+        }
 
     # Créer l'utilisateur
     user = {
-        "email": email,
+        "username": username,
         "name": name.strip(),
         "password_hash": _hash_password(password),
         "role": role,
@@ -121,11 +132,11 @@ def register_user(
     }
 
 
-def authenticate_user(email: str, password: str) -> dict:
+def authenticate_user(username: str, password: str) -> dict:
     """Authentifie un utilisateur.
 
     Args:
-        email: Adresse email.
+        username: Nom d'utilisateur.
         password: Mot de passe.
 
     Returns:
@@ -134,7 +145,7 @@ def authenticate_user(email: str, password: str) -> dict:
     users = _load_users()
 
     for user in users:
-        if user["email"] == email:
+        if user["username"] == username:
             if _verify_password(password, user["password_hash"]):
                 return {
                     "success": True,
@@ -149,7 +160,7 @@ def authenticate_user(email: str, password: str) -> dict:
 
     return {
         "success": False,
-        "message": "Aucun compte trouvé avec cet email.",
+        "message": "Aucun compte trouvé avec ce nom d'utilisateur.",
     }
 
 
@@ -168,7 +179,7 @@ def login_user(user: dict):
     """Connecte l'utilisateur dans la session Streamlit.
 
     Args:
-        user: Dict avec email, name, role.
+        user: Dict avec username, name, role.
     """
     st.session_state.authenticated = True
     st.session_state.user = user
@@ -225,7 +236,7 @@ def get_user_display() -> str:
         "professeur": "👨‍🏫",
         "eleve": "👨‍🎓",
     }.get(user["role"], "👤")
-    return f"{role_icon} {user['name']} ({user['role']})"
+    return f"{role_icon} {user['name']} ({user['username']})"
 
 
 # ── Fonctions Admin ───────────────────────────────────────────────────────
@@ -240,30 +251,33 @@ def get_all_users() -> list[dict]:
     ]
 
 
-def delete_user(email: str) -> dict:
-    """Supprime un utilisateur par son email.
+def delete_user(username: str) -> dict:
+    """Supprime un utilisateur par son nom d'utilisateur.
 
     Args:
-        email: Email de l'utilisateur à supprimer.
+        username: Nom d'utilisateur à supprimer.
 
     Returns:
         dict avec success et message.
     """
     users = _load_users()
-    filtered = [u for u in users if u["email"] != email]
+    filtered = [u for u in users if u["username"] != username]
 
     if len(filtered) == len(users):
         return {"success": False, "message": "Utilisateur introuvable."}
 
     _save_users(filtered)
-    return {"success": True, "message": f"Utilisateur {email} supprimé."}
+    return {
+        "success": True,
+        "message": f"Utilisateur {username} supprimé.",
+    }
 
 
-def update_user_role(email: str, new_role: str) -> dict:
+def update_user_role(username: str, new_role: str) -> dict:
     """Change le rôle d'un utilisateur.
 
     Args:
-        email: Email de l'utilisateur.
+        username: Nom d'utilisateur.
         new_role: Nouveau rôle.
 
     Returns:
@@ -274,15 +288,35 @@ def update_user_role(email: str, new_role: str) -> dict:
 
     users = _load_users()
     for u in users:
-        if u["email"] == email:
+        if u["username"] == username:
             u["role"] = new_role
             _save_users(users)
             return {
                 "success": True,
-                "message": f"Rôle de {email} changé en {new_role}.",
+                "message": f"Rôle de {username} changé en {new_role}.",
             }
 
     return {"success": False, "message": "Utilisateur introuvable."}
+
+
+def admin_create_user(
+    username: str,
+    name: str,
+    password: str,
+    role: str,
+) -> dict:
+    """Crée un utilisateur directement depuis le panneau admin (sans code secret).
+
+    Args:
+        username: Nom d'utilisateur.
+        name: Nom d'affichage.
+        password: Mot de passe (>= 6 caractères).
+        role: "admin", "professeur" ou "eleve".
+
+    Returns:
+        dict avec success et message.
+    """
+    return register_user(username, name, password, role)
 
 
 def count_users() -> dict:

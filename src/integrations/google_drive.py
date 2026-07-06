@@ -11,10 +11,11 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 # ── Scopes Google Drive ──────────────────────────────────────────────────
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 # ── Configuration ────────────────────────────────────────────────────────
 DRIVE_FOLDER_ID = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "")
+DRIVE_OWNER_EMAIL = os.getenv("DRIVE_OWNER_EMAIL", "")
 
 
 class GoogleDriveClient:
@@ -83,6 +84,9 @@ class GoogleDriveClient:
     ) -> str:
         """Upload un fichier PDF vers Google Drive.
 
+        Transfère la propriété à l'email configuré (DRIVE_OWNER_EMAIL)
+        pour utiliser le quota du Drive personnel.
+
         Args:
             file_path: Chemin local du fichier.
             filename: Nom du fichier sur Drive.
@@ -94,29 +98,46 @@ class GoogleDriveClient:
         Raises:
             GoogleAuthError: Si l'authentification échoue.
         """
-        # Vérifier si le fichier existe déjà
+        # Vérifier si le fichier existe déjà → mise à jour
         existing_id = self._find_file(filename)
         if existing_id:
-            # Mettre à jour le fichier existant
             media = MediaFileUpload(file_path, mimetype=mime_type)
             self.service.files().update(
                 fileId=existing_id,
                 media_body=media,
+                supportsAllDrives=True,
             ).execute()
             return existing_id
 
-        # Créer un nouveau fichier
-        file_metadata = {
-            "name": filename,
-            "parents": [self.folder_id] if self.folder_id else [],
-        }
+        # 1. Le robot crée le fichier dans ton dossier
         media = MediaFileUpload(file_path, mimetype=mime_type)
-        file = (
-            self.service.files()
-            .create(body=file_metadata, media_body=media, fields="id")
-            .execute()
-        )
-        return file.get("id")
+        uploaded_file = self.service.files().create(
+            body={
+                "name": filename,
+                "parents": [self.folder_id],
+            },
+            media_body=media,
+            fields="id",
+            supportsAllDrives=True,  # Obligatoire
+        ).execute()
+
+        file_id = uploaded_file.get("id")
+
+        # 2. Transfert de propriété vers le Drive personnel
+        if DRIVE_OWNER_EMAIL:
+            permission_metadata = {
+                "type": "user",
+                "role": "owner",  # Tu deviens le propriétaire officiel
+                "emailAddress": DRIVE_OWNER_EMAIL,
+            }
+            self.service.permissions().create(
+                fileId=file_id,
+                body=permission_metadata,
+                transferOwnership=True,  # Force le transfert
+                supportsAllDrives=True,
+            ).execute()
+
+        return file_id
 
     def download_pdf(self, file_id: str) -> bytes:
         """Télécharge un fichier PDF depuis Google Drive.
@@ -127,7 +148,7 @@ class GoogleDriveClient:
         Returns:
             Contenu du fichier en bytes.
         """
-        request = self.service.files().get_media(fileId=file_id)
+        request = self.service.files().get_media(fileId=file_id, supportsAllDrives=True)
         file_bytes = io.BytesIO()
         downloader = MediaIoBaseDownload(file_bytes, request)
         done = False
@@ -152,6 +173,8 @@ class GoogleDriveClient:
                 q=query,
                 fields="files(id, name, createdTime, size)",
                 orderBy="createdTime desc",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
             )
             .execute()
         )
@@ -163,7 +186,10 @@ class GoogleDriveClient:
         Args:
             file_id: ID du fichier à supprimer.
         """
-        self.service.files().delete(fileId=file_id).execute()
+        self.service.files().delete(
+            fileId=file_id,
+            supportsAllDrives=True,
+        ).execute()
 
     def _find_file(self, filename: str) -> Optional[str]:
         """Cherche un fichier par nom dans le dossier Drive.
@@ -181,7 +207,12 @@ class GoogleDriveClient:
         )
         results = (
             self.service.files()
-            .list(q=query, fields="files(id)")
+            .list(
+                q=query,
+                fields="files(id)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            )
             .execute()
         )
         files = results.get("files", [])

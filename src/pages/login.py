@@ -35,9 +35,9 @@ def show():
         st.subheader("Connexion")
 
         with st.form("form_connexion"):
-            email = st.text_input(
-                "Email",
-                placeholder="ex: jean.dupont@email.com",
+            username = st.text_input(
+                "Nom d'utilisateur",
+                placeholder="ex: jean.dupont",
             )
             password = st.text_input(
                 "Mot de passe",
@@ -51,10 +51,10 @@ def show():
             )
 
             if submitted:
-                if not email or not password:
+                if not username or not password:
                     st.error("❌ Veuillez remplir tous les champs.")
                 else:
-                    result = authenticate_user(email, password)
+                    result = authenticate_user(username, password)
                     if result["success"]:
                         login_user(result["user"])
                         st.success(
@@ -77,9 +77,10 @@ def show():
                 placeholder="ex: Jean Dupont",
             )
 
-            email = st.text_input(
-                "Email",
-                placeholder="ex: jean.dupont@email.com",
+            username = st.text_input(
+                "Nom d'utilisateur",
+                placeholder="ex: jean.dupont",
+                help="Identifiant unique pour vous connecter (2-30 car., lettres, chiffres, tirets).",
             )
 
             col1, col2 = st.columns(2)
@@ -128,8 +129,8 @@ def show():
                 errors = []
                 if not name.strip():
                     errors.append("Le nom est requis.")
-                if not email:
-                    errors.append("L'email est requis.")
+                if not username:
+                    errors.append("Le nom d'utilisateur est requis.")
                 if not password:
                     errors.append("Le mot de passe est requis.")
                 if password != password_confirm:
@@ -153,7 +154,7 @@ def show():
                             st.stop()
 
                     result = register_user(
-                        email=email,
+                        username=username,
                         name=name.strip(),
                         password=password,
                         role=final_role,
@@ -174,6 +175,5 @@ def show():
 
         st.markdown("---")
         st.caption(
-            "💡 Les mots de passe sont hachés avec bcrypt. "
-            "Aucun email n'est envoyé."
+            "💡 Les mots de passe sont hachés avec bcrypt."
         )
