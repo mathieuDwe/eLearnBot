@@ -17,7 +17,9 @@ from integrations.legifrance import (
 
 def show():
     """Affiche l'interface Legifrance."""
-    if not require_role("professeur", redirect=False) and not require_role("eleve", redirect=False) and not require_role("admin", redirect=False):
+    from core.auth import get_current_user
+    user = get_current_user()
+    if not user:
         st.error("⛔ Vous devez être connecté.")
         return
 
