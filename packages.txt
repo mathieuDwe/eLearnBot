@@ -1,3 +1,0 @@
-# Paquets système requis pour Streamlit Cloud
-# Installés via apt-get avant le pip install
-ffmpeg
