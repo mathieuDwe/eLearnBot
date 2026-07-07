@@ -13,26 +13,18 @@ pdfplumber>=0.10.0
 sentence-transformers>=2.2.0
 chromadb>=0.4.0
 
-# === Google Drive ===
-google-api-python-client>=2.100.0
-google-auth-httplib2>=0.1.1
-google-auth-oauthlib>=1.1.0
-
 # === LLM (API) ===
 openai>=1.0.0          # Compatible Groq / OpenAI / Mammouth
 groq>=0.5.0            # Client Groq natif
-google-genai>=1.0.0  # Gemini (nouveau SDK)
+google-genai>=1.0.0    # Gemini (nouveau SDK)
+
+# === Traitement Vidéo MP4 ===
+imageio-ffmpeg>=0.5.0     # Binaire ffmpeg (extraction audio)
 
 # === Utils ===
 python-dotenv>=1.0.0
 bcrypt>=4.0.0
 requests>=2.31.0
-pydantic>=2.0.0
-PyYAML>=6.0
-
-# === Traitement Vidéo MP4 ===
-openai-whisper>=20240930  # Transcription audio locale
-imageio-ffmpeg>=0.5.0     # Binaire ffmpeg embarqué
 
 # === Quality & Tests ===
 pytest>=7.4.0

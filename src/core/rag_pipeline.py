@@ -118,8 +118,8 @@ def index_document(
     metadata = metadata or {}
     store = get_vector_store()
 
-    # Découper en chunks
-    chunks = chunk_text(text, chunk_size=500, overlap=50)
+    # Découper en chunks (plus grands pour les transcriptions vidéo)
+    chunks = chunk_text(text, chunk_size=800, overlap=100)
 
     if not chunks:
         return ""
@@ -132,7 +132,6 @@ def index_document(
 def answer_question(
     question: str,
     document_name: Optional[str] = None,
-    n_results: int = 5,
 ) -> dict:
     """Répond à une question en utilisant le pipeline RAG.
 
@@ -143,7 +142,6 @@ def answer_question(
     Args:
         question: La question posée par l'utilisateur.
         document_name: Filtrer sur un document spécifique.
-        n_results: Nombre de chunks à récupérer.
 
     Returns:
         Dict avec 'answer' (str) et 'sources' (list[str]).
@@ -158,7 +156,7 @@ def answer_question(
     # Recherche des chunks pertinents
     results = store.search(
         query=question,
-        n_results=n_results,
+        n_results=8,
         filter_dict=filter_dict,
     )
 
@@ -175,9 +173,10 @@ def answer_question(
     context_parts = []
     sources = []
     for i, r in enumerate(results, 1):
-        context_parts.append(f"[Passage {i}]:\n{r['text']}")
+        filename = r['metadata'].get('filename', 'Source inconnue')
+        context_parts.append(f"[Passage {i} — {filename}]:\n{r['text']}")
         source_info = (
-            f"{r['metadata'].get('filename', 'Source inconnue')} "
+            f"{filename} "
             f"(score: {1 - r['score']:.2%})"
         )
         sources.append(source_info)
@@ -186,11 +185,15 @@ def answer_question(
 
     # Prompt RAG
     prompt = f"""Tu es un assistant pédagogique spécialisé dans l'aide aux élèves.
-Tu réponds UNIQUEMENT à partir des passages de cours fournis ci-dessous.
-Si les passages ne contiennent pas l'information, réponds honnêtement que tu ne sais pas.
-Cite toujours le passage source entre crochets [Passage X] dans ta réponse.
+Tu reçois des extraits de cours (PDF) ou des transcriptions de vidéos éducatives.
 
-Contexte issu des cours :
+Consignes :
+- Analyse ATTENTIVEMENT le contexte fourni, même s'il semble désorganisé (transcription audio, notes partielles…).
+- Si tu identifies le sujet ou des informations utiles, réponds avec ce que tu as.
+- Si les passages sont vraiment vides ou inexploitables, dis-le clairement.
+- Cite toujours le passage source entre crochets [Passage X] dans ta réponse.
+
+Contexte issu des cours et vidéos :
 {context}
 
 Question de l'élève : {question}

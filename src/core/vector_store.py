@@ -1,7 +1,9 @@
 """💾 Base vectorielle ChromaDB pour la recherche sémantique."""
 
+import io
 import os
 import uuid
+import zipfile
 from typing import Optional
 
 import chromadb
@@ -13,6 +15,90 @@ from core.embeddings import EmbeddingGenerator
 # ── Configuration ────────────────────────────────────────────────────────
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", "./chroma_db")
 COLLECTION_NAME = "elearnbot_documents"
+CLOUD_BACKUP_KEY = "chroma_db_backup.zip"
+
+
+def _get_supabase_storage() -> Optional[object]:
+    """Retourne le bucket Supabase Storage pour les backups ChromaDB."""
+    try:
+        from integrations.supabase_storage import SupabaseStorage
+        return SupabaseStorage()
+    except Exception as e:
+        print(f"ℹ️ Supabase Storage non disponible : {e}")
+        return None
+
+
+def _zip_chroma_db(persist_directory: str) -> bytes:
+    """Compresse le dossier ChromaDB en zip.
+
+    Args:
+        persist_directory: Chemin du dossier ChromaDB.
+
+    Returns:
+        Contenu du zip en bytes.
+    """
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _, files in os.walk(persist_directory):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, persist_directory)
+                zf.write(file_path, arcname)
+    return buf.getvalue()
+
+
+def _unzip_chroma_db(zip_bytes: bytes, persist_directory: str):
+    """Extrait un zip dans le dossier ChromaDB.
+
+    Args:
+        zip_bytes: Contenu du zip en bytes.
+        persist_directory: Dossier de destination.
+    """
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        zf.extractall(persist_directory)
+
+
+def load_chroma_from_cloud():
+    """Télécharge et restaure ChromaDB depuis Supabase Storage.
+
+    À appeler au démarrage de l'application.
+    """
+    storage = _get_supabase_storage()
+    if storage is None:
+        return
+
+    try:
+        zip_bytes = storage.download_file(CLOUD_BACKUP_KEY)
+        if zip_bytes:
+            os.makedirs(CHROMA_DB_PATH, exist_ok=True)
+            _unzip_chroma_db(zip_bytes, CHROMA_DB_PATH)
+            print(f"✅ ChromaDB restaurée depuis le cloud ({len(zip_bytes)} octets)")
+    except Exception as e:
+        print(f"ℹ️ Aucun backup ChromaDB trouvé dans le cloud : {e}")
+
+
+def save_chroma_to_cloud():
+    """Sauvegarde ChromaDB vers Supabase Storage.
+
+    À appeler après chaque indexation de document.
+    """
+    storage = _get_supabase_storage()
+    if storage is None:
+        return
+
+    if not os.path.exists(CHROMA_DB_PATH):
+        return
+
+    try:
+        zip_bytes = _zip_chroma_db(CHROMA_DB_PATH)
+        storage.upload_bytes(
+            data=zip_bytes,
+            filename=CLOUD_BACKUP_KEY,
+            content_type="application/zip",
+        )
+        print(f"✅ ChromaDB sauvegardée dans le cloud ({len(zip_bytes)} octets)")
+    except Exception as e:
+        print(f"⚠️ Échec de la sauvegarde ChromaDB : {e}")
 
 
 class VectorStore:
@@ -82,6 +168,9 @@ class VectorStore:
             metadatas=metadatas,
             ids=ids,
         )
+
+        # Persister vers le cloud après chaque ajout
+        save_chroma_to_cloud()
 
         return ids
 
@@ -165,6 +254,8 @@ class VectorStore:
         )
         if results["ids"]:
             self.collection.delete(ids=results["ids"])
+            # Persister vers le cloud après suppression
+            save_chroma_to_cloud()
         return len(results["ids"])
 
     def count_documents(self) -> int:
@@ -180,5 +271,7 @@ def get_vector_store() -> VectorStore:
     """Retourne l'instance globale du vector store."""
     global _global_vector_store
     if _global_vector_store is None:
+        # Essayer de restaurer depuis le cloud (Streamlit Cloud)
+        load_chroma_from_cloud()
         _global_vector_store = VectorStore()
     return _global_vector_store

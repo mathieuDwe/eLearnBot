@@ -24,6 +24,18 @@ def show():
         return
 
     st.title("⚖️ Recherche Juridique")
+
+    # ── Bannière Légifrance ──────────────────────────────────────────────
+    if not PISTE_API_KEY:
+        st.warning(
+            "⏳ **Recherche Légifrance** — bientôt disponible.\n\n"
+            "L'accès direct aux articles via Légifrance sera activé "
+            "prochainement dès la configuration de l'API.\n\n"
+            "En attendant, utilisez l'onglet **Saisie manuelle** pour "
+            "coller le texte d'un article, ou le **Chat juridique** "
+            "pour interroger ceux déjà indexés."
+        )
+
     st.markdown(
         "Consultez des articles de loi, indexez-les et posez des questions "
         "via le moteur RAG."
@@ -34,65 +46,64 @@ def show():
 
     # ── Onglet 1 : Recherche ────────────────────────────────────────────
     with tabs[0]:
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            query = st.text_input(
-                "Recherche (mot-clé, article, code…)",
-                placeholder="Ex: article 1240 code civil, liberté d'expression...",
-                key="legi_search_query",
+        if not PISTE_API_KEY:
+            st.info(
+                "🔜 **Recherche automatique — bientôt disponible**\n\n"
+                "Cet onglet permettra de chercher des articles directement "
+                "sur Légifrance, mais la clé API n'est pas encore configurée.\n\n"
+                "👉 Utilisez l'onglet **Saisie manuelle** pour indexer "
+                "vos articles juridiques dès maintenant."
             )
-        with col2:
-            max_results = st.number_input("Résultats", 1, 20, 5, key="legi_max")
-
-        if query:
-            with st.spinner("Recherche en cours..."):
-                if PISTE_API_KEY:
-                    results = search_via_piste(query, max_results)
-                else:
-                    results = []
-
-            if not results:
-                st.info(
-                    "Aucun résultat trouvé.\n\n"
-                    "💡 Pour une recherche en ligne, créez un compte gratuit sur "
-                    "[api.piste.gouv.fr](https://api.piste.gouv.fr) "
-                    "et ajoutez `PISTE_API_KEY` dans votre fichier `.env`.\n\n"
-                    "Sinon, utilisez l'onglet **Saisie manuelle** pour coller "
-                    "directement le texte d'un article."
+        else:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                query = st.text_input(
+                    "Recherche (mot-clé, article, code…)",
+                    placeholder="Ex: article 1240 code civil, liberté d'expression...",
+                    key="legi_search_query",
                 )
-            else:
-                st.success(f"{len(results)} résultat(s) trouvé(s)")
-                for r in results:
-                    with st.container(border=True):
-                        st.markdown(f"**{r.title}**")
-                        if r.snippet:
-                            st.markdown(f"*{r.snippet[:300]}...*")
-                        cols = st.columns([3, 1])
-                        with cols[0]:
-                            if r.url:
-                                st.markdown(f"[Voir sur Legifrance]({r.url})")
-                        with cols[1]:
-                            if r.article_id and st.button(
-                                "📥 Indexer", key=f"index_{r.article_id}"
-                            ):
-                                with st.spinner("Récupération de l'article..."):
-                                    article = get_article_via_piste(r.article_id)
-                                    if article:
-                                        text = format_article_for_rag(article)
-                                        meta = get_article_metadata(article)
-                                        doc_id = index_document(
-                                            text, article.title, meta
-                                        )
-                                        if doc_id:
-                                            st.success(f"✅ Indexé : {article.title}")
-                                            st.rerun()
+            with col2:
+                max_results = st.number_input("Résultats", 1, 20, 5, key="legi_max")
+
+            if query:
+                with st.spinner("Recherche en cours..."):
+                    results = search_via_piste(query, max_results)
+
+                if not results:
+                    st.info("Aucun résultat trouvé.")
+                else:
+                    st.success(f"{len(results)} résultat(s) trouvé(s)")
+                    for r in results:
+                        with st.container(border=True):
+                            st.markdown(f"**{r.title}**")
+                            if r.snippet:
+                                st.markdown(f"*{r.snippet[:300]}...*")
+                            cols = st.columns([3, 1])
+                            with cols[0]:
+                                if r.url:
+                                    st.markdown(f"[Voir sur Legifrance]({r.url})")
+                            with cols[1]:
+                                if r.article_id and st.button(
+                                    "📥 Indexer", key=f"index_{r.article_id}"
+                                ):
+                                    with st.spinner("Récupération de l'article..."):
+                                        article = get_article_via_piste(r.article_id)
+                                        if article:
+                                            text = format_article_for_rag(article)
+                                            meta = get_article_metadata(article)
+                                            doc_id = index_document(
+                                                text, article.title, meta
+                                            )
+                                            if doc_id:
+                                                st.success(f"✅ Indexé : {article.title}")
+                                                st.rerun()
+                                            else:
+                                                st.error("❌ Échec de l'indexation.")
                                         else:
-                                            st.error("❌ Échec de l'indexation.")
-                                    else:
-                                        st.error(
-                                            "❌ Impossible de récupérer l'article. "
-                                            "Utilisez la saisie manuelle."
-                                        )
+                                            st.error(
+                                                "❌ Impossible de récupérer l'article. "
+                                                "Utilisez la saisie manuelle."
+                                            )
 
     # ── Onglet 2 : Saisie manuelle ──────────────────────────────────────
     with tabs[1]:

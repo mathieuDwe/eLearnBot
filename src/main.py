@@ -7,7 +7,7 @@ load_dotenv()
 
 import streamlit as st
 
-from core.auth import init_session, is_authenticated, get_current_user, logout_user
+from core.auth import init_session, is_authenticated, get_current_user
 
 # ── Configuration de la page ──────────────────────────────────────────────
 st.set_page_config(
@@ -52,98 +52,53 @@ st.markdown("""
         font-weight: 600;
         padding: 0.5rem 2rem;
     }
-    /* Style pour le badge utilisateur dans la sidebar */
-    .user-badge {
-        background: #e8f0fe;
-        border-radius: 8px;
-        padding: 0.8rem;
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-        text-align: center;
-    }
-    .user-badge-admin {
-        border-left: 3px solid #FFD700;
-    }
-    .user-badge-prof {
-        border-left: 3px solid #4A90D9;
-    }
-    .user-badge-eleve {
-        border-left: 3px solid #34A853;
+    /* Masquer la navigation automatique Streamlit (pages/*.py) */
+    [data-testid="stSidebarNav"] {
+        display: none;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────────
-st.sidebar.image(
-    "https://img.icons8.com/fluency/96/books.png",
-    width=80,
-)
-st.sidebar.title("🎓 eLearnBot")
-st.sidebar.markdown("---")
+col_logo, col_title = st.sidebar.columns([1, 3])
+with col_logo:
+    st.image(
+        "https://img.icons8.com/fluency/96/books.png",
+        width=70,
+    )
+with col_title:
+    st.markdown("## 🎓 eLearnBot")
 
 # ── Affichage selon authentification ──────────────────────────────────────
 if is_authenticated():
     user = get_current_user()
 
-    # ── Badge utilisateur ───────────────────────────────────────────────
-    role_class = {
-        "admin": "user-badge-admin",
-        "professeur": "user-badge-prof",
-        "eleve": "user-badge-eleve",
-    }.get(user["role"], "user-badge-eleve")
-
-    role_icon = {
-        "admin": "👑",
-        "professeur": "👨‍🏫",
-        "eleve": "👨‍🎓",
-    }.get(user["role"], "👤")
-
-    st.sidebar.markdown(
-        f"<div class='user-badge {role_class}'>"
-        f"  <strong>{role_icon} {user['name']}</strong><br>"
-        f"  <small>@{user['username']}</small><br>"
-        f"  <small>Rôle : {user['role']}</small>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.sidebar.markdown("---")
-
-    # ── Bouton de déconnexion ───────────────────────────────────────────
-    if st.sidebar.button("🚪 Déconnexion", use_container_width=True):
-        logout_user()
-        st.rerun()
-
     # ── Navigation ────────────────────────────────────────────────────
-    # Définir les pages disponibles selon le rôle
     role = user["role"]
 
     pages_config = {
         "admin": [
-            ("🏠", "Dashboard", "admin"),
+            ("🏠", "Accueil", "accueil"),
             ("👨‍🏫", "Professeur", "professeur"),
             ("👨‍🎓", "Élève", "eleve"),
             ("⚖️", "Légifrance", "legifrance"),
             ("❓", "Aide", "aide"),
         ],
         "professeur": [
-            ("👨‍🏫", "Tableau de bord", "professeur"),
+            ("👨‍🏫", "Professeur", "professeur"),
             ("⚖️", "Légifrance", "legifrance"),
             ("❓", "Aide", "aide"),
         ],
         "eleve": [
-            ("👨‍🎓", "Tableau de bord", "eleve"),
+            ("👨‍🎓", "Élève", "eleve"),
             ("⚖️", "Légifrance", "legifrance"),
             ("❓", "Aide", "aide"),
         ],
     }
 
-    # Session : mémoriser la page active
     if "current_page" not in st.session_state:
         st.session_state.current_page = pages_config[role][0][2]
 
-    # Sidebar : liens de navigation
-    st.sidebar.markdown("### 📍 Navigation")
     for icon, label, page_id in pages_config[role]:
         active = st.session_state.current_page == page_id
         btn_style = "primary" if active else "secondary"
@@ -156,11 +111,12 @@ if is_authenticated():
             st.session_state.current_page = page_id
             st.rerun()
 
-    st.sidebar.markdown("---")
-
     # Routage selon la page sélectionnée
     page = st.session_state.current_page
-    if page == "admin":
+    if page == "accueil":
+        from pages.accueil import show
+        show()
+    elif page == "admin":
         from pages.admin import show
         show()
     elif page == "professeur":
@@ -177,6 +133,5 @@ if is_authenticated():
         show()
 
 else:
-    # ── Non connecté : uniquement l'écran de connexion ─────────────────
     from pages.login import show
     show()

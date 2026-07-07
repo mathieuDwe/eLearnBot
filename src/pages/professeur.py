@@ -99,13 +99,13 @@ def show():
             uploaded_file = st.file_uploader(
                 "Choisissez une vidéo MP4",
                 type=["mp4"],
-                help="Taille max : 200 Mo. La piste audio sera transcrite en texte.",
+                help="Taille max : 50 Mo. La piste audio sera transcrite en texte.",
                 key="mp4_uploader",
             )
 
             if uploaded_file is not None:
-                if uploaded_file.size > 200 * 1024 * 1024:
-                    st.error("❌ Le fichier dépasse 200 Mo.")
+                if uploaded_file.size > 50 * 1024 * 1024:
+                    st.error("❌ Le fichier dépasse 50 Mo.")
                 else:
                     # Progression
                     progress_bar = st.progress(0, text="Préparation...")

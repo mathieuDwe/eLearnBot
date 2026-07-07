@@ -67,30 +67,6 @@ class SupabaseStorage:
 
         return self.bucket.get_public_url(filename)
 
-    def upload_bytes(
-        self,
-        data: bytes,
-        filename: str,
-        content_type: str = "application/pdf",
-    ) -> str:
-        """Upload des bytes vers Supabase Storage (sans fichier temporaire).
-
-        Args:
-            data: Contenu du fichier en bytes.
-            filename: Nom du fichier sur Supabase.
-            content_type: Type MIME (non utilisé).
-
-        Returns:
-            URL publique du fichier stocké.
-        """
-        self.bucket.upload(
-            path=filename,
-            file=data,
-            file_options={"content-type": "application/pdf"},
-        )
-
-        return self.bucket.get_public_url(filename)
-
     def delete_file(self, filename: str):
         """Supprime un fichier de Supabase Storage.
 
@@ -116,4 +92,33 @@ class SupabaseStorage:
         Returns:
             URL publique.
         """
+        return self.bucket.get_public_url(filename)
+
+    def download_file(self, filename: str) -> Optional[bytes]:
+        """Télécharge un fichier depuis Supabase Storage.
+
+        Args:
+            filename: Nom du fichier à télécharger.
+
+        Returns:
+            Contenu du fichier en bytes, ou None si introuvable.
+        """
+        try:
+            res = self.bucket.download(path=filename)
+            return res
+        except Exception:
+            return None
+
+    def upload_bytes(
+        self,
+        data: bytes,
+        filename: str,
+        content_type: str = "application/pdf",
+    ) -> str:
+        """Upload des bytes vers Supabase Storage (sans fichier temporaire)."""
+        self.bucket.upload(
+            path=filename,
+            file=data,
+            file_options={"content-type": content_type},
+        )
         return self.bucket.get_public_url(filename)
