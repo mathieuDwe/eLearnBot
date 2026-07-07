@@ -41,7 +41,7 @@ def show():
         st.markdown("""
         - **PDF** : fichiers texte (pas de PDF scannés)
         - **MP4** : vidéos avec transcription automatique
-        - Taille max : **10 Mo** par PDF, **50 Mo** par vidéo
+        - Taille max : **10 Mo** par PDF, **100 Mo** par vidéo
         """)
 
     with st.expander("🔒 Mes données sont-elles privées ?"):
