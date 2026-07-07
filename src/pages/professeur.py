@@ -201,7 +201,14 @@ def show():
                             deleted = get_vector_store().delete_document(
                                 doc["filename"]
                             )
-                            st.success(f"✅ {deleted} passages supprimés.")
+                            # Supprimer aussi de Supabase Storage
+                            try:
+                                from integrations.supabase_storage import SupabaseStorage
+                                storage = SupabaseStorage()
+                                storage.delete_file(doc["filename"])
+                                st.success(f"✅ {deleted} passages supprimés + fichier effacé du cloud.")
+                            except Exception as e:
+                                st.success(f"✅ {deleted} passages supprimés (cloud: {e}).")
                             st.rerun()
 
     # ── Onglet 3 : Paramètres ──────────────────────────────────────────

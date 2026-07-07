@@ -223,10 +223,18 @@ def show():
                             key=f"admin_del_{doc['filename']}",
                             use_container_width=True,
                         ):
+                            # Supprimer de ChromeDB
                             deleted = get_vector_store().delete_document(
                                 doc["filename"]
                             )
-                            st.success(f"✅ {deleted} passages supprimés.")
+                            # Supprimer de Supabase Storage
+                            try:
+                                from integrations.supabase_storage import SupabaseStorage
+                                storage = SupabaseStorage()
+                                storage.delete_file(doc["filename"])
+                                st.success(f"✅ {deleted} passages supprimés + fichier effacé du cloud.")
+                            except Exception as e:
+                                st.success(f"✅ {deleted} passages supprimés (cloud: {e}).")
                             st.rerun()
 
             st.divider()
