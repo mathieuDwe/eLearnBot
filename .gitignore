@@ -50,11 +50,9 @@ logs/
 # Docker
 .docker/
 
-# ChromaDB persistence
-chroma_db/
-
 # User data (local JSON storage)
-data/users.json
+data/
+chroma_db/
 
 # Service account (ne pas commiter)
 service_account.json

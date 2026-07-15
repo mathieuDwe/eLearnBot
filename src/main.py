@@ -9,7 +9,7 @@ import os
 import streamlit as st
 
 from core.auth import init_session, is_authenticated, get_current_user, logout_user
-from core.vector_store import load_chroma_from_cloud
+from core.document_store import load_from_cloud
 from integrations.supabase_storage import check_supabase_health
 
 # ── Configuration de la page ──────────────────────────────────────────────
@@ -24,10 +24,10 @@ st.set_page_config(
 init_session()
 
 # ── Initialisation des connexions persistantes ────────────────────────────
-# Restaurer ChromaDB depuis le cloud (nécessaire après redémarrage
+# Restaurer les documents depuis le cloud (nécessaire après redémarrage
 # sur Streamlit Cloud où le filesystem est éphémère)
-with st.spinner("🔄 Restauration de la base vectorielle..."):
-    load_chroma_from_cloud()
+with st.spinner("🔄 Restauration des documents..."):
+    load_from_cloud()
 
 # ── CSS personnalisé ──────────────────────────────────────────────────────
 st.markdown("""
@@ -111,12 +111,13 @@ with st.sidebar:
         err = health.get("error", "")
         st.caption(f"❌ **Supabase** — {err[:60]}")
 
-    # ChromaDB
-    chroma_ok = os.path.isdir(os.getenv("CHROMA_DB_PATH", "./chroma_db"))
-    if chroma_ok:
-        st.caption("✅ **ChromaDB** — base locale présente")
+    # Documents
+    from core.document_store import count_documents
+    nb_docs = count_documents()
+    if nb_docs > 0:
+        st.caption(f"📚 **Documents** — {nb_docs} cours indexés")
     else:
-        st.caption("ℹ️ **ChromaDB** — sera créée au 1er upload")
+        st.caption("ℹ️ **Documents** — aucun cours indexé")
     st.divider()
 
 # ── Affichage selon authentification ──────────────────────────────────────

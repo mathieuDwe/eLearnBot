@@ -47,8 +47,7 @@ def show():
     with st.expander("🔒 Mes données sont-elles privées ?"):
         st.markdown("""
         Oui ! Les cours sont stockés localement et indexés dans une base
-        vectorielle (ChromaDB). Aucune donnée n'est partagée avec des tiers.
-        Les embeddings sont générés localement.
+        de données JSON. Aucune donnée n'est partagée avec des tiers.
         """)
 
     with st.expander("🎥 Comment ajouter une vidéo ?"):
@@ -72,9 +71,9 @@ def show():
         **Stack technique :**
         - **Frontend** : Streamlit
         - **Backend** : Python
-        - **Vector Store** : ChromaDB
-        - **Transcription** : Whisper (local)
-        - **LLM** : Groq / Gemini / OpenAI
+        - **Stockage** : Supabase + JSON local
+        - **Recherche** : mots-clés (pas de LLM)
+        - **Transcription** : Whisper (Groq)
 
         **Code source :** [GitHub](https://github.com) (bientôt disponible)
         """)

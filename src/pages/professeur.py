@@ -9,7 +9,7 @@ from core.auth import require_role, get_current_user
 from core.pdf_extractor import extract_text_from_pdf
 from core.video_processor import process_video
 from core.rag_pipeline import index_document, get_available_documents
-from core.vector_store import CHROMA_DB_PATH
+from core.document_store import delete_document as delete_doc_store
 from integrations.supabase_storage import SupabaseStorage
 
 
@@ -197,10 +197,7 @@ def show():
                             "🗑️ Supprimer",
                             key=f"del_{doc['filename']}",
                         ):
-                            from core.vector_store import get_vector_store
-                            deleted = get_vector_store().delete_document(
-                                doc["filename"]
-                            )
+                            deleted = delete_doc_store(doc["filename"])
                             # Supprimer aussi de Supabase Storage
                             try:
                                 from integrations.supabase_storage import SupabaseStorage
@@ -230,7 +227,7 @@ def show():
                             with col1:
                                 st.markdown(f"**{fname}**")
                                 if already_indexed:
-                                    st.caption("✅ Déjà indexé dans ChromaDB")
+                                    st.caption("✅ Déjà indexé")
                                 else:
                                     st.caption("⏳ Non indexé — cliquer pour restaurer")
                             with col2:
@@ -245,7 +242,6 @@ def show():
                                         "📥 Restaurer",
                                         key=f"restore_{fname}",
                                     ):
-                                        # Télécharger depuis le bucket et ré-indexer
                                         from core.pdf_extractor import extract_text_from_bytes
                                         from core.rag_pipeline import index_document
 
@@ -253,7 +249,7 @@ def show():
                                         if file_bytes:
                                             text = extract_text_from_bytes(file_bytes)
                                             if text.strip():
-                                                doc_id = index_document(
+                                                index_document(
                                                     text=text,
                                                     filename=fname,
                                                     metadata={"content_type": "pdf", "restored": True},
@@ -294,12 +290,13 @@ def show():
         # ── Informations stockage ───────────────────────────────────────
         st.markdown("---")
         with st.expander("💾 Informations sur le stockage", expanded=True):
-            chroma_path = os.path.abspath(CHROMA_DB_PATH)
-            chroma_size = 0
-            for dirpath, _, filenames in os.walk(chroma_path):
+            from core.document_store import _DATA_DIR
+            data_path = os.path.abspath(_DATA_DIR)
+            data_size = 0
+            for dirpath, _, filenames in os.walk(data_path):
                 for f in filenames:
                     fp = os.path.join(dirpath, f)
-                    chroma_size += os.path.getsize(fp)
+                    data_size += os.path.getsize(fp)
 
             docs = get_available_documents()
             total_chunks = sum(d.get("chunks", 0) for d in docs)
@@ -307,17 +304,16 @@ def show():
             st.markdown(f"""
             | Élément | Emplacement / Valeur |
             |---|---|
-            | 🗄️ **Base vectorielle** | `{chroma_path}/` |
-            | 💾 **Taille sur disque** | `{_format_size(chroma_size)}` |
+            | 📂 **Données** | `{data_path}/` |
+            | 💾 **Taille sur disque** | `{_format_size(data_size)}` |
             | 📚 **Cours indexés** | `{len(docs)}` |
             | 🔢 **Total passages** | `{total_chunks}` |
             | 🗑️ **Fichiers temporaires** | Supprimés après indexation |
             """)
 
             st.caption(
-                "💡 Les embeddings restent persistés dans ChromaDB. "
-                "Tant que la base n'est pas supprimée, les élèves "
-                "peuvent interroger les cours."
+                "💡 Les documents sont stockés dans un fichier JSON. "
+                "Un backup est sauvegardé dans Supabase Storage."
             )
 
 
@@ -331,7 +327,7 @@ def _index_and_store(
     content_type: str,
     metadata: dict = None,
 ):
-    """Indexe le texte dans ChromaDB.
+    """Indexe le texte dans le stockage local.
 
     Args:
         tmp_path: Chemin du fichier temporaire.
@@ -355,16 +351,17 @@ def _index_and_store(
 
     # ── Logs de stockage ────────────────────────────────────────────
     abs_tmp = os.path.abspath(tmp_path)
-    chroma_abs = os.path.abspath(CHROMA_DB_PATH)
+    from core.document_store import _DATA_DIR
+    data_abs = os.path.abspath(_DATA_DIR)
     st.info(
         f"📂 **Fichier temporaire :** `{abs_tmp}`\n\n"
         f"🗑️ Sera supprimé après indexation.\n\n"
-        f"💾 **Base vectorielle :** `{chroma_abs}/`\n\n"
-        f"📦 Les embeddings restent persistés dans ChromaDB "
-        f"(même après suppression du fichier temporaire)."
+        f"💾 **Stockage local :** `{data_abs}/`\n\n"
+        f"📦 Les données sont persistées dans le fichier JSON local "
+        f"et sauvegardées dans Supabase Storage."
     )
 
-    # Indexation ChromaDB
+    # Indexation
     doc_id = index_document(
         text=text,
         filename=filename,

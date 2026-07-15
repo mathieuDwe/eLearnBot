@@ -14,7 +14,7 @@ from core.auth import (
     ROLES,
 )
 from core.rag_pipeline import get_available_documents
-from core.vector_store import get_vector_store
+from core.document_store import delete_document as delete_doc_store
 
 
 def show():
@@ -223,10 +223,7 @@ def show():
                             key=f"admin_del_{doc['filename']}",
                             use_container_width=True,
                         ):
-                            # Supprimer de ChromeDB
-                            deleted = get_vector_store().delete_document(
-                                doc["filename"]
-                            )
+                            deleted = delete_doc_store(doc["filename"])
                             # Supprimer de Supabase Storage
                             try:
                                 from integrations.supabase_storage import SupabaseStorage

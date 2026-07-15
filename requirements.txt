@@ -3,8 +3,6 @@ streamlit
 PyPDF2
 pdfplumber
 groq
-chromadb
-sentence-transformers
 imageio-ffmpeg
 supabase
 python-dotenv

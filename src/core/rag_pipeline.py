@@ -1,41 +1,64 @@
-"""🔄 Pipeline de recherche vectorielle (Retrieval).
+"""🔄 Pipeline de recherche documentaire.
 
-Sans LLM : regroupe les résultats par document et affiche une vue
-synthétique — pas de copier-coller de texte brut dans la réponse."""
+Sans LLM ni ChromaDB : stockage JSON local + recherche par mots-clés."""
 
 import re
-from collections import defaultdict
 
-from core.pdf_extractor import chunk_text
-from core.vector_store import get_vector_store
-
-
-# ── Mots vides ───────────────────────────────────────────────────────────
-_STOPWORDS = {
-    "dans", "avec", "cette", "entre", "avoir", "faire", "tout", "plus",
-    "pour", "sur", "dont", "leurs", "ainsi", "mais", "donc", "alors",
-    "bien", "très", "fait", "être", "peut", "sont", "leur", "nous",
-    "vous", "elles", "ils", "elle", "quel", "quels", "quelle", "quelles",
-    "parce", "comme", "chez", "sans", "dans", "avec", "aussi", "ni",
-    "car", "où", "dont", "depuis", "pendant", "quand", "après", "avant",
-}
+from core import document_store
+from core.pdf_extractor import chunk_text as pdf_chunk_text
 
 
-def _format_size(size_bytes: int) -> str:
-    """Formate une taille en bytes vers une lisible (Ko, Mo)."""
-    if size_bytes < 1024:
-        return f"{size_bytes} o"
-    elif size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} Ko"
-    else:
-        return f"{size_bytes / (1024 * 1024):.1f} Mo"
+def _split_sentences(text: str) -> list[str]:
+    """Découpe un texte en phrases."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    return [s.strip() for s in sentences if len(s.strip()) > 15]
 
 
-def _truncate(text: str, max_len: int = 150) -> str:
-    """Tronque un texte avec une ellipse si nécessaire."""
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3].rsplit(" ", 1)[0] + "…"
+def _extract_relevant_sentences(
+    chunk_text: str,
+    keywords: set[str] | None = None,
+    max_sentences: int = 3,
+) -> str:
+    """Extrait les phrases les plus pertinentes d'un chunk.
+
+    Args:
+        chunk_text: Texte du chunk.
+        keywords: Mots-clés ou None (retourne le début).
+        max_sentences: Nombre max de phrases.
+
+    Returns:
+        Texte concaténé des phrases pertinentes.
+    """
+    if not keywords:
+        sentences = _split_sentences(chunk_text)
+        return " ".join(sentences[:min(2, len(sentences))]) if sentences else chunk_text[:300]
+
+    sentences = _split_sentences(chunk_text)
+    scored = []
+
+    for s in sentences:
+        s_lower = s.lower()
+        score = sum(1 for k in keywords if k in s_lower)
+        if score > 0:
+            scored.append((score, s))
+
+    scored.sort(key=lambda x: (-x[0], len(x[1])))
+
+    if not scored:
+        sentences = _split_sentences(chunk_text)
+        return sentences[0] if sentences else chunk_text[:200]
+
+    selected = [s for _, s in scored[:max_sentences]]
+
+    deduped = []
+    seen = set()
+    for s in selected:
+        key = s.lower()[:60]
+        if key not in seen:
+            seen.add(key)
+            deduped.append(s)
+
+    return " ".join(deduped)
 
 
 def index_document(
@@ -43,11 +66,10 @@ def index_document(
     filename: str,
     metadata: dict = None,
 ) -> str:
-    """Indexe un document dans la base vectorielle.
+    """Indexe un document dans le stockage local.
 
     1. Découpe le texte en chunks
-    2. Génère les embeddings
-    3. Stocke dans ChromaDB
+    2. Stocke dans le fichier JSON
 
     Args:
         text: Texte complet du document.
@@ -55,51 +77,31 @@ def index_document(
         metadata: Métadonnées additionnelles.
 
     Returns:
-        ID du document (premier chunk).
+        ID du document.
     """
-    metadata = metadata or {}
-    store = get_vector_store()
-
-    # Découper en chunks (plus grands pour les transcriptions vidéo)
-    chunks = chunk_text(text, chunk_size=800, overlap=100)
-
-    if not chunks:
-        return ""
-
-    # Indexer
-    ids = store.add_document(chunks, filename, metadata)
-    return ids[0] if ids else ""
+    return document_store.add_document(text, filename, metadata)
 
 
 def answer_question(
     question: str,
     document_name: str = None,
 ) -> dict:
-    """Cherche les passages pertinents dans les cours indexés.
+    """Cherche les passages pertinents dans les cours.
 
-    Sans LLM : regroupe les résultats par document et affiche les noms
-    et métadonnées. Le texte brut est relégué dans l'expander Sources.
+    Mots-clés + phrases pertinentes — pas de LLM, pas de vecteurs.
 
     Args:
-        question: La question posée par l'utilisateur.
+        question: La question posée.
         document_name: Filtrer sur un document spécifique.
 
     Returns:
-        Dict avec 'answer' (str) — vue documentaire sans texte brut,
-        et 'sources' (list[str]) — extraits pertinents.
+        Dict avec 'answer' (str) et 'sources' (list[str]).
     """
-    store = get_vector_store()
-
-    # Filtrer par document si spécifié
-    filter_dict = None
-    if document_name:
-        filter_dict = {"filename": document_name}
-
-    # Recherche des chunks pertinents
-    results = store.search(
+    # Recherche par mots-clés
+    results = document_store.search(
         query=question,
-        n_results=15,
-        filter_dict=filter_dict,
+        n_results=10,
+        document_name=document_name,
     )
 
     if not results:
@@ -111,20 +113,24 @@ def answer_question(
             "sources": [],
         }
 
-    # ── Regrouper les chunks par document ─────────────────────────────
+    # Extraire les mots-clés de la question
+    keywords = document_store._extract_keywords(question)
+
+    # Regrouper par document
+    from collections import defaultdict
     docs = defaultdict(list)
     for r in results:
         fname = r['metadata'].get('filename', 'Source inconnue')
         docs[fname].append(r)
 
-    # Trier les documents par score max décroissant
+    # Trier les documents par score max
     doc_scores = {}
     for fname, chunks_list in docs.items():
-        doc_scores[fname] = max(1 - c['score'] for c in chunks_list)
+        doc_scores[fname] = max(r['score'] for r in chunks_list)
 
     sorted_docs = sorted(doc_scores.items(), key=lambda x: -x[1])
 
-    # ── Réponse : uniquement la fiche documentaire ───────────────────
+    # Réponse : fiches documentaires
     answer_parts = [
         f"🔍 **{len(docs)} document(s) trouvé(s)** "
         f"pour votre question :\n"
@@ -135,7 +141,6 @@ def answer_question(
         meta = chunks_list[0]['metadata']
         content_type = meta.get("content_type", "pdf")
 
-        # Icône et type
         doc_type = meta.get("type", "")
         if doc_type == "legal":
             icon = "⚖️"
@@ -147,25 +152,16 @@ def answer_question(
             icon = "📄"
             type_label = "Cours (PDF)"
 
-        # Métadonnées affichables
-        meta_lines = []
-        meta_lines.append(f"📂 **Type :** {type_label}")
-
-        # Durée pour les vidéos
+        meta_lines = [f"📂 **Type :** {type_label}"]
         duration = meta.get("duration_display", "")
         if duration:
             meta_lines.append(f"⏱ **Durée :** {duration}")
-
-        # Taille du fichier
         file_size = meta.get("size", 0)
         if file_size:
+            from core.document_store import _format_size
             meta_lines.append(f"💾 **Taille :** {_format_size(file_size)}")
-
-        # Nombre de chunks
         meta_lines.append(f"🔢 **Passages :** {len(chunks_list)}")
-
-        score_pct = best_score * 100
-        meta_lines.append(f"📊 **Pertinence :** {score_pct:.1f}%")
+        meta_lines.append(f"📊 **Pertinence :** {best_score * 100:.1f}%")
 
         answer_parts.append(
             f"---\n\n"
@@ -173,25 +169,24 @@ def answer_question(
             + "\n".join(f"  {l}" for l in meta_lines)
         )
 
-    # ── Sources : extraits pertinents par document ──────────────────
+    # Sources : extraits par document
     sources = []
     for fname, _ in sorted_docs:
         chunks_list = docs[fname]
-
         source_parts = [f"📄 **{fname}** — passages pertinents :\n"]
-        for j, c in enumerate(chunks_list[:3], 1):  # top 3 chunks/doc
-            score_pct = (1 - c['score']) * 100
-            text_snippet = _truncate(c['text'], 300)
+        for j, c in enumerate(chunks_list[:3], 1):
+            score_pct = c['score'] * 100
+            text_snippet = c['text'][:300]
+            if len(c['text']) > 300:
+                text_snippet = c['text'][:297].rsplit(" ", 1)[0] + "…"
             source_parts.append(
                 f"**Passage {j}** (pertinence: {score_pct:.1f}%)\n"
                 f"> {text_snippet}"
             )
-
         if len(chunks_list) > 3:
             source_parts.append(
                 f"\n*… et {len(chunks_list) - 3} autre(s) passage(s)*"
             )
-
         sources.append("\n\n".join(source_parts))
 
     return {
@@ -201,10 +196,5 @@ def answer_question(
 
 
 def get_available_documents() -> list[dict]:
-    """Retourne la liste des documents indexés.
-
-    Returns:
-        Liste de dicts avec les infos des documents.
-    """
-    store = get_vector_store()
-    return store.get_documents_list()
+    """Retourne la liste des documents indexés."""
+    return document_store.get_documents_list()
