@@ -2,9 +2,7 @@
 streamlit
 PyPDF2
 pdfplumber
-openai
 groq
-google-genai
 chromadb
 sentence-transformers
 imageio-ffmpeg

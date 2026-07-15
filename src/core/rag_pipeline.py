@@ -1,105 +1,15 @@
-"""🔄 Pipeline RAG (Retrieval Augmented Generation)."""
+"""🔄 Pipeline de recherche vectorielle (Retrieval).
 
-import os
-from typing import Optional
+Sans LLM : retourne les passages pertinents bruts trouvés dans les cours."""
 
 from core.pdf_extractor import chunk_text
-from core.embeddings import get_embedder
 from core.vector_store import get_vector_store
-
-
-# ── Configuration LLM ────────────────────────────────────────────────────
-def _get_llm_client():
-    """Configure et retourne le client LLM selon les variables d'environnement."""
-    groq_key = os.getenv("GROQ_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-
-    if groq_key:
-        from groq import Groq
-        return Groq(api_key=groq_key), "groq"
-    elif openai_key:
-        from openai import OpenAI
-        return OpenAI(api_key=openai_key), "openai"
-    elif gemini_key:
-        from google import genai as genai_client
-        genai_client.Client(api_key=gemini_key)
-        return genai_client, "gemini"
-    else:
-        return None, "none"
-
-
-def _get_default_model(provider: str) -> str:
-    """Retourne le modèle par défaut selon le provider."""
-    models = {
-        "groq": os.getenv("LLM_MODEL", "llama-3.3-70b-versatile"),
-        "openai": os.getenv("LLM_MODEL", "gpt-4o-mini"),
-        "gemini": os.getenv("LLM_MODEL", "gemini-2.0-flash"),
-    }
-    return models.get(provider, "unknown")
-
-
-def _call_llm(prompt: str) -> str:
-    """Appelle le LLM configuré avec un prompt.
-
-    Args:
-        prompt: Le prompt complet à envoyer.
-
-    Returns:
-        La réponse textuelle du LLM.
-
-    Raises:
-        RuntimeError: Si aucun LLM n'est configuré.
-    """
-    client, provider = _get_llm_client()
-    if client is None:
-        return (
-            "⚠️ Aucune clé API LLM configurée.\n\n"
-            "Configurez GROQ_API_KEY, OPENAI_API_KEY ou GEMINI_API_KEY "
-            "dans votre fichier .env pour activer les réponses IA.\n\n"
-            "Voici les passages pertinents trouvés dans le cours :\n"
-        )
-
-    model = _get_default_model(provider)
-
-    try:
-        if provider == "groq":
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1024,
-            )
-            return completion.choices[0].message.content
-
-        elif provider == "openai":
-            completion = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1024,
-            )
-            return completion.choices[0].message.content
-
-        elif provider == "gemini":
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config={"temperature": 0.3, "max_output_tokens": 1024},
-            )
-            return response.text
-
-    except Exception as e:
-        return f"❌ Erreur lors de l'appel LLM : {e}"
-
-
-# ── Pipeline principal ───────────────────────────────────────────────────
 
 
 def index_document(
     text: str,
     filename: str,
-    metadata: Optional[dict] = None,
+    metadata: dict = None,
 ) -> str:
     """Indexe un document dans la base vectorielle.
 
@@ -131,13 +41,12 @@ def index_document(
 
 def answer_question(
     question: str,
-    document_name: Optional[str] = None,
+    document_name: str = None,
 ) -> dict:
-    """Répond à une question en utilisant le pipeline RAG.
+    """Cherche les passages pertinents dans les cours indexés.
 
-    1. Recherche les chunks pertinents dans ChromaDB
-    2. Construit un prompt avec le contexte
-    3. Appelle le LLM pour générer la réponse
+    Sans LLM : retourne directement les extraits de cours les plus
+    pertinents par rapport à la question posée.
 
     Args:
         question: La question posée par l'utilisateur.
@@ -169,42 +78,26 @@ def answer_question(
             "sources": [],
         }
 
-    # Construction du contexte
-    context_parts = []
+    # Construire la réponse à partir des passages bruts
+    answer_parts = [
+        f"🔍 **{len(results)} passage(s) trouvé(s)** pour votre question :\n"
+    ]
     sources = []
+
     for i, r in enumerate(results, 1):
         filename = r['metadata'].get('filename', 'Source inconnue')
-        context_parts.append(f"[Passage {i} — {filename}]:\n{r['text']}")
-        source_info = (
-            f"{filename} "
-            f"(score: {1 - r['score']:.2%})"
+        score_pct = (1 - r['score']) * 100  # similarité en %
+
+        answer_parts.append(
+            f"---\n\n"
+            f"📄 **Passage {i}** — *{filename}*\n"
+            f"📊 **Pertinence :** {score_pct:.1f}%\n\n"
+            f"> {r['text']}"
         )
-        sources.append(source_info)
-
-    context = "\n\n---\n\n".join(context_parts)
-
-    # Prompt RAG
-    prompt = f"""Tu es un assistant pédagogique spécialisé dans l'aide aux élèves.
-Tu reçois des extraits de cours (PDF) ou des transcriptions de vidéos éducatives.
-
-Consignes :
-- Analyse ATTENTIVEMENT le contexte fourni, même s'il semble désorganisé (transcription audio, notes partielles…).
-- Si tu identifies le sujet ou des informations utiles, réponds avec ce que tu as.
-- Si les passages sont vraiment vides ou inexploitables, dis-le clairement.
-- Cite toujours le passage source entre crochets [Passage X] dans ta réponse.
-
-Contexte issu des cours et vidéos :
-{context}
-
-Question de l'élève : {question}
-
-Réponse :"""
-
-    # Appel LLM
-    answer = _call_llm(prompt)
+        sources.append(f"{filename} (score: {score_pct:.1f}%)")
 
     return {
-        "answer": answer,
+        "answer": "\n\n".join(answer_parts),
         "sources": sources,
     }
 

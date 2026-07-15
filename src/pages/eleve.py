@@ -45,10 +45,10 @@ def show():
         )
         selected_doc = None
     else:
-        # Option : tous les contenus (cours + juridique)
-        doc_options = ["🌐 Tous les contenus (cours + juridique)"]
+        # Option par défaut : rechercher dans tous les cours
+        doc_options = ["🔍 Tous les cours"]
 
-        # Afficher la liste des cours avec leur type
+        # Lister chaque document avec son type
         for d in documents:
             meta = d.get("metadata", {})
             content_type = meta.get("content_type", "pdf")
@@ -66,17 +66,17 @@ def show():
             doc_options.append(label)
 
         selected_label = st.selectbox(
-            "Choisissez un cours (ou 'Tous' pour chercher partout)",
+            "Choisissez un cours spécifique, ou 'Tous' pour chercher partout",
             doc_options,
         )
 
         # Récupérer le filename depuis le label
         selected_idx = doc_options.index(selected_label)
         if selected_idx == 0:
-            selected_doc = None  # Tous les contenus
-            st.caption("🌐 Recherche dans tous les contenus (cours + articles juridiques)")
+            selected_doc = None  # Tous les documents
+            st.caption("🔍 Recherche dans l'ensemble des cours disponibles")
         else:
-            doc_idx = selected_idx - 1  # décalage à cause de l'option "Tous"
+            doc_idx = selected_idx - 1
             selected_doc = documents[doc_idx]["filename"]
             selected_meta = documents[doc_idx].get("metadata", {})
 
@@ -113,9 +113,9 @@ def show():
     # Champ de saisie
     has_content = len(documents) > 0
     if prompt := st.chat_input(
-        "Posez votre question sur l'ensemble des contenus..."
+        "Posez votre question sur tous les cours..."
         if selected_doc is None
-        else "Posez votre question sur le cours sélectionné...",
+        else "Posez votre question sur ce cours...",
         disabled=(not has_content),
     ):
         # Ajouter la question
@@ -127,7 +127,7 @@ def show():
 
         # Générer la réponse
         with st.chat_message("assistant"):
-            scope = "tous les contenus" if selected_doc is None else "le cours"
+            scope = "tous les cours" if selected_doc is None else "le cours"
             with st.spinner(f"🔍 Recherche dans {scope}..."):
                 try:
                     result = answer_question(
