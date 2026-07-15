@@ -14,7 +14,7 @@ from typing import Optional
 import streamlit as st
 
 COOKIE_NAME = "elearnbot_session"
-SESSION_DAYS = 30
+SESSION_DAYS = 1  # 24h
 
 
 def _get_secret() -> str:
