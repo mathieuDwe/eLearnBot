@@ -8,7 +8,7 @@ load_dotenv()
 import os
 import streamlit as st
 
-from core.auth import init_session, is_authenticated, get_current_user
+from core.auth import init_session, is_authenticated, get_current_user, logout_user
 from core.vector_store import load_chroma_from_cloud
 
 # ── Configuration de la page ──────────────────────────────────────────────
@@ -138,6 +138,13 @@ if is_authenticated():
         ):
             st.session_state.current_page = page_id
             st.rerun()
+
+    # ── Déconnexion (tout en bas de la sidebar) ──────────────────────
+    st.sidebar.markdown("---")
+    st.sidebar.caption(f"Connecté en tant que **{user['name']}** ({role})")
+    if st.sidebar.button("🚪 Déconnexion", use_container_width=True):
+        logout_user()
+        st.rerun()
 
     # Routage selon la page sélectionnée
     page = st.session_state.current_page

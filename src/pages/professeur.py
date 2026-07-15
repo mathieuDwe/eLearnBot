@@ -5,7 +5,7 @@ import tempfile
 import os
 from datetime import datetime
 
-from core.auth import require_role, get_current_user, logout_user
+from core.auth import require_role, get_current_user
 from core.pdf_extractor import extract_text_from_pdf
 from core.video_processor import process_video
 from core.rag_pipeline import index_document, get_available_documents
@@ -32,16 +32,7 @@ def show():
         return
 
     user = get_current_user()
-
-    # ── Barre supérieure : titre + déconnexion ───────────────────────────
-    col_titre, col_deco = st.columns([5, 1])
-    with col_titre:
-        st.title("👨‍🏫 Mode Professeur")
-    with col_deco:
-        if st.button("🚪 Déconnexion", use_container_width=True):
-            logout_user()
-            st.rerun()
-
+    st.title("👨‍🏫 Mode Professeur")
     st.markdown(
         f"Bienvenue **{user['name']}** ! "
         "Uploader vos cours (PDF ou MP4). Les élèves pourront ensuite "

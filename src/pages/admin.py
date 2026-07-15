@@ -6,7 +6,6 @@ from datetime import datetime
 from core.auth import (
     require_role,
     get_current_user,
-    logout_user,
     get_all_users,
     delete_user,
     update_user_role,
@@ -25,16 +24,7 @@ def show():
         return
 
     user = get_current_user()
-
-    # ── Barre supérieure : titre + déconnexion ───────────────────────────
-    col_titre, col_deco = st.columns([5, 1])
-    with col_titre:
-        st.title("👑 Panneau d'Administration")
-    with col_deco:
-        if st.button("🚪 Déconnexion", use_container_width=True):
-            logout_user()
-            st.rerun()
-
+    st.title("👑 Panneau d'Administration")
     st.markdown(
         f"Bienvenue **{user['name']}**. "
         "Gérez les utilisateurs et les cours de la plateforme."
