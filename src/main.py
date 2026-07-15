@@ -5,9 +5,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import os
 import streamlit as st
 
 from core.auth import init_session, is_authenticated, get_current_user
+from core.vector_store import load_chroma_from_cloud
 
 # ── Configuration de la page ──────────────────────────────────────────────
 st.set_page_config(
@@ -19,6 +21,12 @@ st.set_page_config(
 
 # Initialiser la session (authentification, etc.)
 init_session()
+
+# ── Initialisation des connexions persistantes ────────────────────────────
+# Restaurer ChromaDB depuis le cloud (nécessaire après redémarrage
+# sur Streamlit Cloud où le filesystem est éphémère)
+with st.spinner("🔄 Restauration de la base vectorielle..."):
+    load_chroma_from_cloud()
 
 # ── CSS personnalisé ──────────────────────────────────────────────────────
 st.markdown("""
@@ -68,6 +76,26 @@ with col_logo:
     )
 with col_title:
     st.markdown("## 🎓 eLearnBot")
+
+# ── Indicateurs d'état des connexions ────────────────────────────────
+with st.sidebar:
+    st.divider()
+    st.caption("🔌 **Connexions**")
+
+    # Supabase
+    supabase_ok = bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"))
+    if supabase_ok:
+        st.caption("✅ **Supabase** — connectée")
+    else:
+        st.caption("⚠️ **Supabase** — non configurée")
+
+    # ChromaDB
+    chroma_ok = os.path.isdir(os.getenv("CHROMA_DB_PATH", "./chroma_db"))
+    if chroma_ok:
+        st.caption("✅ **ChromaDB** — base locale présente")
+    else:
+        st.caption("ℹ️ **ChromaDB** — sera créée au 1er upload")
+    st.divider()
 
 # ── Affichage selon authentification ──────────────────────────────────────
 if is_authenticated():
