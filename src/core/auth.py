@@ -214,18 +214,24 @@ def init_session():
 
 
 def login_user(user: dict):
-    """Connecte l'utilisateur dans la session Streamlit."""
+    """Connecte l'utilisateur dans la session Streamlit + cookie."""
     st.session_state.authenticated = True
     st.session_state.user = user
+    # Persistance : stocker le cookie pour les redémarrages
+    from core.session import set_session_cookie
+    set_session_cookie(user)
 
 
 def logout_user():
-    """Déconnecte l'utilisateur."""
+    """Déconnecte l'utilisateur et efface le cookie."""
     st.session_state.authenticated = False
     st.session_state.user = None
     for key in list(st.session_state.keys()):
         if key not in ("authenticated", "user"):
             del st.session_state[key]
+    # Effacer le cookie
+    from core.session import clear_session_cookie
+    clear_session_cookie()
 
 
 def get_current_user() -> Optional[dict]:

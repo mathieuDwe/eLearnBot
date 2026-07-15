@@ -8,8 +8,9 @@ load_dotenv()
 import os
 import streamlit as st
 
-from core.auth import init_session, is_authenticated, get_current_user, logout_user
+from core.auth import init_session, is_authenticated, get_current_user, logout_user, login_user
 from core.document_store import load_from_cloud
+from core.session import try_auto_login, inject_cookie_check
 from integrations.supabase_storage import check_supabase_health
 
 # ── Configuration de la page ──────────────────────────────────────────────
@@ -23,9 +24,17 @@ st.set_page_config(
 # Initialiser la session (authentification, etc.)
 init_session()
 
+# ── Connexion automatique via cookie ──────────────────────────────────────
+# Vérifie si l'URL contient un token de session (redirigé depuis le cookie)
+auto_user = try_auto_login()
+if auto_user and not is_authenticated():
+    login_user(auto_user)
+
+# Injecte le script de lecture du cookie (pour les redémarrages)
+if not is_authenticated():
+    inject_cookie_check()
+
 # ── Initialisation des connexions persistantes ────────────────────────────
-# Restaurer les documents depuis le cloud (nécessaire après redémarrage
-# sur Streamlit Cloud où le filesystem est éphémère)
 with st.spinner("🔄 Restauration des documents..."):
     load_from_cloud()
 
