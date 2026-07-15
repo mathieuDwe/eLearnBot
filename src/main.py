@@ -10,6 +10,7 @@ import streamlit as st
 
 from core.auth import init_session, is_authenticated, get_current_user, logout_user
 from core.vector_store import load_chroma_from_cloud
+from integrations.supabase_storage import check_supabase_health
 
 # ── Configuration de la page ──────────────────────────────────────────────
 st.set_page_config(
@@ -82,12 +83,33 @@ with st.sidebar:
     st.divider()
     st.caption("🔌 **Connexions**")
 
-    # Supabase
-    supabase_ok = bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"))
-    if supabase_ok:
+    # Supabase — test réel (check à chaque chargement, rafraîchi au rerun)
+    health = check_supabase_health()
+
+    if health["supabase"]:
         st.caption("✅ **Supabase** — connectée")
+        if health["bucket"]:
+            st.caption(f"📦 **Bucket** `{health['bucket_name']}` — {health['files_count']} fichier(s)")
+        else:
+            st.caption(f"⚠️ **Bucket** `{health['bucket_name']}` — inexistant → les uploads échoueront")
+            if st.button("➕ Créer le bucket", key="create_bucket"):
+                try:
+                    from supabase import create_client
+                    client = create_client(
+                        os.getenv("SUPABASE_URL", ""),
+                        os.getenv("SUPABASE_KEY", ""),
+                    )
+                    client.storage.create_bucket(
+                        health['bucket_name'],
+                        options={"public": True},
+                    )
+                    st.success(f"✅ Bucket `{health['bucket_name']}` créé !")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Création échouée : {e}")
     else:
-        st.caption("⚠️ **Supabase** — non configurée")
+        err = health.get("error", "")
+        st.caption(f"❌ **Supabase** — {err[:60]}")
 
     # ChromaDB
     chroma_ok = os.path.isdir(os.getenv("CHROMA_DB_PATH", "./chroma_db"))

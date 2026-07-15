@@ -20,6 +20,51 @@ if _SUPABASE_URL.endswith("/rest/v1/"):
 _client_cache: Optional[Client] = None
 
 
+def check_supabase_health() -> dict:
+    """Vérifie la connexion Supabase et l'existence du bucket.
+
+    Returns:
+        Dict avec les clés 'supabase' (bool), 'bucket' (bool),
+        'bucket_name' (str), 'error' (str|None).
+    """
+    result = {
+        "supabase": False,
+        "bucket": False,
+        "bucket_name": _BUCKET_NAME,
+        "error": None,
+        "files_count": 0,
+    }
+
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        result["error"] = "SUPABASE_URL ou SUPABASE_KEY non définis"
+        return result
+
+    try:
+        client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+        # Tester la connexion en listant les buckets
+        buckets = client.storage.list_buckets()
+        result["supabase"] = True
+
+        # Vérifier si notre bucket existe
+        bucket_names = [b.get("name") if isinstance(b, dict) else getattr(b, "name", "") for b in buckets]
+        if _BUCKET_NAME in bucket_names:
+            result["bucket"] = True
+            # Compter les fichiers
+            try:
+                files = client.storage.from_(_BUCKET_NAME).list()
+                if isinstance(files, list):
+                    result["files_count"] = len(files)
+            except Exception:
+                pass
+        else:
+            result["error"] = f"Le bucket '{_BUCKET_NAME}' n'existe pas dans Supabase"
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return result
+
+
 class SupabaseStorage:
     """Client pour stocker les fichiers dans Supabase Storage."""
 
