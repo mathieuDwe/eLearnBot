@@ -9,6 +9,7 @@ from core.auth import require_role, get_current_user
 from core.pdf_extractor import extract_text_from_pdf
 from core.video_processor import process_video
 from core.rag_pipeline import index_document, get_available_documents
+from core import response_cache
 from core.document_store import delete_document as delete_doc_store
 from integrations.supabase_storage import SupabaseStorage
 
@@ -286,6 +287,19 @@ def show():
 
         if st.button("💾 Sauvegarder les paramètres"):
             st.success("✅ Paramètres sauvegardés !")
+
+        # ── Cache des réponses ───────────────────────────────────────────
+        st.markdown("---")
+        st.subheader("🧠 Cache des réponses")
+        cache_stats = response_cache.stats()
+        st.caption(
+            f"**{cache_stats['entries']}** questions en cache "
+            f"({cache_stats['file_size']})"
+        )
+        if st.button("🗑️ Vider le cache", use_container_width=True):
+            response_cache.clear()
+            st.success("✅ Cache vidé !")
+            st.rerun()
 
         # ── Informations stockage ───────────────────────────────────────
         st.markdown("---")

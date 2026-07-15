@@ -1,103 +1,150 @@
-"""🔄 Pipeline de recherche documentaire.
+"""🔄 Pipeline de réponse aux questions.
 
-Sans LLM ni ChromaDB : stockage JSON local + recherche par mots-clés."""
+Avec cache : si la question a déjà été posée, pas d'appel LLM.
+Si LLM dispo : réponse générée avec le contexte des cours.
+Sinon : retourne la vue documentaire."""
 
+import os
 import re
+from collections import defaultdict
 
-from core import document_store
-from core.pdf_extractor import chunk_text as pdf_chunk_text
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Découpe un texte en phrases."""
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    return [s.strip() for s in sentences if len(s.strip()) > 15]
+from core import document_store, response_cache
 
 
-def _extract_relevant_sentences(
-    chunk_text: str,
-    keywords: set[str] | None = None,
-    max_sentences: int = 3,
-) -> str:
-    """Extrait les phrases les plus pertinentes d'un chunk.
+# ── Configuration LLM ────────────────────────────────────────────────────
 
-    Args:
-        chunk_text: Texte du chunk.
-        keywords: Mots-clés ou None (retourne le début).
-        max_sentences: Nombre max de phrases.
+_PROVIDER_ERRORS: dict[str, str] = {}
+
+
+def _get_configured_providers() -> list[tuple]:
+    """Retourne tous les providers LLM configurés.
+
+    Chaque tuple : (client, provider_name, model)
+    L'ordre détermine la priorité d'appel."""
+    providers = []
+
+    groq_key = os.getenv("GROQ_API_KEY")
+    mammouth_key = os.getenv("MAMMOUTH_API_KEY")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    llm_model = os.getenv("LLM_MODEL", "")
+
+    if groq_key:
+        try:
+            from groq import Groq
+            providers.append((
+                Groq(api_key=groq_key),
+                "groq",
+                llm_model or "llama-3.3-70b-versatile",
+            ))
+        except ImportError:
+            pass
+
+    if mammouth_key:
+        try:
+            from openai import OpenAI
+            providers.append((
+                OpenAI(api_key=mammouth_key, base_url="https://api.mammouth.ai/v1"),
+                "mammouth",
+                llm_model or "kimi-k2.5",
+            ))
+        except ImportError:
+            pass
+
+    if gemini_key:
+        try:
+            from google import genai as genai_client
+            providers.append((
+                genai_client.Client(api_key=gemini_key),
+                "gemini",
+                llm_model or "gemini-2.0-flash",
+            ))
+        except ImportError:
+            pass
+
+    return providers
+
+
+def _call_llm(prompt: str) -> str:
+    """Appelle le premier LLM disponible avec fallback.
+
+    Essaye chaque provider configuré dans l'ordre (Groq → Mammouth → Gemini).
+    Si l'un échoue (rate limit, token épuisé, erreur serveur),
+    passe automatiquement au suivant.
 
     Returns:
-        Texte concaténé des phrases pertinentes.
+        Texte de la réponse, ou "" si tous les providers ont échoué.
     """
-    if not keywords:
-        sentences = _split_sentences(chunk_text)
-        return " ".join(sentences[:min(2, len(sentences))]) if sentences else chunk_text[:300]
+    providers = _get_configured_providers()
+    if not providers:
+        return ""
 
-    sentences = _split_sentences(chunk_text)
-    scored = []
+    for client, provider, model in providers:
+        # Si ce provider a déjà échoué durant cette session, le sauter
+        if _PROVIDER_ERRORS.get(provider) == "token_exhausted":
+            continue
 
-    for s in sentences:
-        s_lower = s.lower()
-        score = sum(1 for k in keywords if k in s_lower)
-        if score > 0:
-            scored.append((score, s))
+        try:
+            if provider == "gemini":
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config={"temperature": 0.3, "max_output_tokens": 1024},
+                )
+                return response.text
+            else:
+                # groq, mammouth — tous OpenAI-compatibles
+                completion = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=1024,
+                )
+                return completion.choices[0].message.content
 
-    scored.sort(key=lambda x: (-x[0], len(x[1])))
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(x in err_str for x in (
+                "rate limit", "rate_limit", "429",
+                "quota", "token exhausted", "insufficient",
+                "resource exhausted", "too many requests",
+            )):
+                _PROVIDER_ERRORS[provider] = "token_exhausted"
+            # Sinon (erreur auth, réseau, etc.) on réessaiera au prochain appel
+            continue
 
-    if not scored:
-        sentences = _split_sentences(chunk_text)
-        return sentences[0] if sentences else chunk_text[:200]
+    return ""
 
-    selected = [s for _, s in scored[:max_sentences]]
 
-    deduped = []
-    seen = set()
-    for s in selected:
-        key = s.lower()[:60]
-        if key not in seen:
-            seen.add(key)
-            deduped.append(s)
-
-    return " ".join(deduped)
-
+# ── Indexation ────────────────────────────────────────────────────────────
 
 def index_document(
     text: str,
     filename: str,
     metadata: dict = None,
 ) -> str:
-    """Indexe un document dans le stockage local.
-
-    1. Découpe le texte en chunks
-    2. Stocke dans le fichier JSON
-
-    Args:
-        text: Texte complet du document.
-        filename: Nom du fichier.
-        metadata: Métadonnées additionnelles.
-
-    Returns:
-        ID du document.
-    """
     return document_store.add_document(text, filename, metadata)
 
+
+# ── Réponse ──────────────────────────────────────────────────────────────
 
 def answer_question(
     question: str,
     document_name: str = None,
 ) -> dict:
-    """Cherche les passages pertinents dans les cours.
+    """Répond à une question avec cache + LLM (si dispo).
 
-    Mots-clés + phrases pertinentes — pas de LLM, pas de vecteurs.
-
-    Args:
-        question: La question posée.
-        document_name: Filtrer sur un document spécifique.
-
-    Returns:
-        Dict avec 'answer' (str) et 'sources' (list[str]).
+    1. Vérifie le cache → réponse immédiate si déjà posée
+    2. Cherche les passages pertinents dans les cours
+    3. Si LLM configuré : génère une réponse avec le contexte
+    4. Si pas de LLM : retourne la vue documentaire (fallback)
     """
-    # Recherche par mots-clés
+
+    # ── 1. Vérifier le cache ────────────────────────────────────────
+    cached = response_cache.get(question)
+    if cached is not None:
+        return cached
+
+    # ── 2. Recherche dans les documents ──────────────────────────────
     results = document_store.search(
         query=question,
         n_results=10,
@@ -113,28 +160,56 @@ def answer_question(
             "sources": [],
         }
 
-    # Extraire les mots-clés de la question
-    keywords = document_store._extract_keywords(question)
-
     # Regrouper par document
-    from collections import defaultdict
     docs = defaultdict(list)
     for r in results:
         fname = r['metadata'].get('filename', 'Source inconnue')
         docs[fname].append(r)
 
-    # Trier les documents par score max
-    doc_scores = {}
-    for fname, chunks_list in docs.items():
-        doc_scores[fname] = max(r['score'] for r in chunks_list)
-
+    doc_scores = {f: max(r['score'] for r in cl) for f, cl in docs.items()}
     sorted_docs = sorted(doc_scores.items(), key=lambda x: -x[1])
 
-    # Réponse : fiches documentaires
+    # ── 3. Appel LLM (si configuré) ─────────────────────────────────
+    if _get_configured_providers():
+        # Construire le contexte
+        context_parts = []
+        source_list = []
+        for i, (fname, _) in enumerate(sorted_docs, 1):
+            for j, c in enumerate(docs[fname][:3], 1):
+                context_parts.append(
+                    f"[Source {i}.{j} — {fname}]:\n{c['text']}"
+                )
+            source_list.append(f"{fname}")
+
+        context = "\n\n".join(context_parts)
+
+        prompt = f"""Tu es un assistant pédagogique. Réponds à la question de l'élève
+en t'appuyant UNIQUEMENT sur le contexte fourni ci-dessous.
+
+Contexte (extraits des cours) :
+{context}
+
+Question : {question}
+
+Réponds de façon claire et concise. Si le contexte ne contient pas
+l'information, dis-le honnêtement."""
+
+        answer = _call_llm(prompt)
+
+        if answer:
+            result = {
+                "answer": answer,
+                "sources": source_list,
+            }
+            response_cache.set(question, result["answer"], result["sources"])
+            return result
+
+    # ── 4. Fallback : vue documentaire (pas de LLM) ─────────────────
     answer_parts = [
         f"🔍 **{len(docs)} document(s) trouvé(s)** "
         f"pour votre question :\n"
     ]
+    sources = []
 
     for i, (fname, best_score) in enumerate(sorted_docs, 1):
         chunks_list = docs[fname]
@@ -169,32 +244,26 @@ def answer_question(
             + "\n".join(f"  {l}" for l in meta_lines)
         )
 
-    # Sources : extraits par document
-    sources = []
-    for fname, _ in sorted_docs:
-        chunks_list = docs[fname]
-        source_parts = [f"📄 **{fname}** — passages pertinents :\n"]
+        # Sources détaillées
+        doc_src = [f"📄 **{fname}** — passages pertinents :\n"]
         for j, c in enumerate(chunks_list[:3], 1):
             score_pct = c['score'] * 100
-            text_snippet = c['text'][:300]
-            if len(c['text']) > 300:
-                text_snippet = c['text'][:297].rsplit(" ", 1)[0] + "…"
-            source_parts.append(
+            text = c['text'][:297].rsplit(" ", 1)[0] + "…" if len(c['text']) > 300 else c['text']
+            doc_src.append(
                 f"**Passage {j}** (pertinence: {score_pct:.1f}%)\n"
-                f"> {text_snippet}"
+                f"> {text}"
             )
         if len(chunks_list) > 3:
-            source_parts.append(
-                f"\n*… et {len(chunks_list) - 3} autre(s) passage(s)*"
-            )
-        sources.append("\n\n".join(source_parts))
+            doc_src.append(f"\n*… et {len(chunks_list) - 3} autre(s) passage(s)*")
+        sources.append("\n\n".join(doc_src))
 
-    return {
+    result = {
         "answer": "\n\n".join(answer_parts),
         "sources": sources,
     }
+    response_cache.set(question, result["answer"], result["sources"])
+    return result
 
 
 def get_available_documents() -> list[dict]:
-    """Retourne la liste des documents indexés."""
     return document_store.get_documents_list()

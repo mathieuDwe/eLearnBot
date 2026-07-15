@@ -3,6 +3,8 @@ streamlit
 PyPDF2
 pdfplumber
 groq
+openai
+google-genai
 imageio-ffmpeg
 supabase
 python-dotenv
