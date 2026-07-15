@@ -1,9 +1,10 @@
 """🔄 Pipeline de recherche vectorielle (Retrieval).
 
-Sans LLM : extrait les phrases pertinentes des cours et les présente
-sous forme de réponse synthétique — pas de copier-coller brut."""
+Sans LLM : regroupe les résultats par document et affiche une vue
+synthétique — pas de copier-coller de texte brut dans la réponse."""
 
 import re
+from collections import defaultdict
 
 from core.pdf_extractor import chunk_text
 from core.vector_store import get_vector_store
@@ -20,72 +21,21 @@ _STOPWORDS = {
 }
 
 
-def _extract_keywords(text: str) -> set[str]:
-    """Extrait les mots-clés significatifs d'une question.
-
-    Garde les mots de 4+ caractères hors stopwords.
-    """
-    words = re.findall(r"[a-zA-ZéèêëàâîïôûùçÉÈÊËÀÂÎÏÔÛÙÇ]{2,}", text.lower())
-    return {w for w in words if w not in _STOPWORDS and len(w) >= 3}
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Découpe un texte en phrases."""
-    sentences = re.split(r"(?<=[.!?])\s+", text)
-    return [s.strip() for s in sentences if len(s.strip()) > 15]
+def _format_size(size_bytes: int) -> str:
+    """Formate une taille en bytes vers une lisible (Ko, Mo)."""
+    if size_bytes < 1024:
+        return f"{size_bytes} o"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} Ko"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} Mo"
 
 
-def _extract_relevant_sentences(
-    chunk_text: str,
-    keywords: set[str],
-    max_sentences: int = 3,
-) -> str:
-    """Extrait les phrases les plus pertinentes d'un chunk.
-
-    Les phrases sont scorées selon le nombre de mots-clés de la question
-    qu'elles contiennent. Seules les meilleures sont conservées.
-
-    Args:
-        chunk_text: Texte du chunk à analyser.
-        keywords: Mots-clés extraits de la question.
-        max_sentences: Nombre maximum de phrases à garder.
-
-    Returns:
-        Texte concaténé des phrases les plus pertinentes.
-    """
-    if not keywords:
-        # Aucun mot-clé identifiable → premières phrases du chunk
-        sentences = _split_sentences(chunk_text)
-        return " ".join(sentences[:min(2, len(sentences))]) if sentences else chunk_text[:300]
-
-    sentences = _split_sentences(chunk_text)
-    scored = []
-
-    for s in sentences:
-        s_lower = s.lower()
-        score = sum(1 for k in keywords if k in s_lower)
-        if score > 0:
-            scored.append((score, s))
-
-    scored.sort(key=lambda x: (-x[0], len(x[1])))  # plus de matchs, puis plus court
-
-    if not scored:
-        # Fallback : retourner un extrait du début du chunk
-        sentences = _split_sentences(chunk_text)
-        return sentences[0] if sentences else chunk_text[:200]
-
-    selected = [s for _, s in scored[:max_sentences]]
-
-    # Supprimer les doublons (phrases quasi-identiques)
-    deduped = []
-    seen = set()
-    for s in selected:
-        key = s.lower()[:60]
-        if key not in seen:
-            seen.add(key)
-            deduped.append(s)
-
-    return " ".join(deduped)
+def _truncate(text: str, max_len: int = 150) -> str:
+    """Tronque un texte avec une ellipse si nécessaire."""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3].rsplit(" ", 1)[0] + "…"
 
 
 def index_document(
@@ -127,15 +77,16 @@ def answer_question(
 ) -> dict:
     """Cherche les passages pertinents dans les cours indexés.
 
-    Sans LLM : extrait les phrases pertinentes de chaque passage
-    par rapport à la question posée (matching de mots-clés).
+    Sans LLM : regroupe les résultats par document et affiche les noms
+    et métadonnées. Le texte brut est relégué dans l'expander Sources.
 
     Args:
         question: La question posée par l'utilisateur.
         document_name: Filtrer sur un document spécifique.
 
     Returns:
-        Dict avec 'answer' (str) et 'sources' (list[str]).
+        Dict avec 'answer' (str) — vue documentaire sans texte brut,
+        et 'sources' (list[str]) — extraits pertinents.
     """
     store = get_vector_store()
 
@@ -147,7 +98,7 @@ def answer_question(
     # Recherche des chunks pertinents
     results = store.search(
         query=question,
-        n_results=8,
+        n_results=15,
         filter_dict=filter_dict,
     )
 
@@ -160,42 +111,88 @@ def answer_question(
             "sources": [],
         }
 
-    # Extraire les mots-clés de la question
-    keywords = _extract_keywords(question)
+    # ── Regrouper les chunks par document ─────────────────────────────
+    docs = defaultdict(list)
+    for r in results:
+        fname = r['metadata'].get('filename', 'Source inconnue')
+        docs[fname].append(r)
 
-    # Construire une réponse synthétique
+    # Trier les documents par score max décroissant
+    doc_scores = {}
+    for fname, chunks_list in docs.items():
+        doc_scores[fname] = max(1 - c['score'] for c in chunks_list)
+
+    sorted_docs = sorted(doc_scores.items(), key=lambda x: -x[1])
+
+    # ── Réponse : uniquement la fiche documentaire ───────────────────
     answer_parts = [
-        f"🔍 **{len(results)} extrait(s) trouvé(s)** dans les cours :\n"
+        f"🔍 **{len(docs)} document(s) trouvé(s)** "
+        f"pour votre question :\n"
     ]
-    sources = []
 
-    for i, r in enumerate(results, 1):
-        filename = r['metadata'].get('filename', 'Source inconnue')
-        score_pct = (1 - r['score']) * 100
-        full_text = r['text']
+    for i, (fname, best_score) in enumerate(sorted_docs, 1):
+        chunks_list = docs[fname]
+        meta = chunks_list[0]['metadata']
+        content_type = meta.get("content_type", "pdf")
 
-        # Extraire uniquement les phrases pertinentes
-        relevant = _extract_relevant_sentences(full_text, keywords)
+        # Icône et type
+        doc_type = meta.get("type", "")
+        if doc_type == "legal":
+            icon = "⚖️"
+            type_label = "Article juridique"
+        elif content_type == "mp4":
+            icon = "🎬"
+            type_label = "Cours vidéo"
+        else:
+            icon = "📄"
+            type_label = "Cours (PDF)"
 
-        # Tronquer si la réponse est encore trop longue
-        if len(relevant) > 400:
-            relevant = relevant[:397] + "…"
+        # Métadonnées affichables
+        meta_lines = []
+        meta_lines.append(f"📂 **Type :** {type_label}")
+
+        # Durée pour les vidéos
+        duration = meta.get("duration_display", "")
+        if duration:
+            meta_lines.append(f"⏱ **Durée :** {duration}")
+
+        # Taille du fichier
+        file_size = meta.get("size", 0)
+        if file_size:
+            meta_lines.append(f"💾 **Taille :** {_format_size(file_size)}")
+
+        # Nombre de chunks
+        meta_lines.append(f"🔢 **Passages :** {len(chunks_list)}")
+
+        score_pct = best_score * 100
+        meta_lines.append(f"📊 **Pertinence :** {score_pct:.1f}%")
 
         answer_parts.append(
             f"---\n\n"
-            f"📄 **Extrait {i}** — *{filename}*\n"
-            f"📊 **Pertinence :** {score_pct:.1f}%\n\n"
-            f"> {relevant}"
+            f"{icon} **{fname}**\n\n"
+            + "\n".join(f"  {l}" for l in meta_lines)
         )
 
-        # Source plus complète dans l'expander
-        source_full = full_text[:500]
-        if len(full_text) > 500:
-            source_full += "\n*(… suite tronquée, voir le document complet)*"
-        sources.append(
-            f"{filename} (score: {score_pct:.1f}%)\n\n"
-            f"> {source_full}"
-        )
+    # ── Sources : extraits pertinents par document ──────────────────
+    sources = []
+    for fname, _ in sorted_docs:
+        chunks_list = docs[fname]
+
+        source_parts = [f"📄 **{fname}** — passages pertinents :\n"]
+        for j, c in enumerate(chunks_list[:3], 1):  # top 3 chunks/doc
+            score_pct = (1 - c['score']) * 100
+            text_snippet = _truncate(c['text'], 300)
+            source_parts.append(
+                f"**Passage {j}** (pertinence: {score_pct:.1f}%)\n"
+                f"> {text_snippet}"
+            )
+
+        if len(chunks_list) > 3:
+            source_parts.append(
+                f"\n*… et {len(chunks_list) - 3} autre(s) passage(s)*"
+            )
+
+        sources.append("\n\n".join(source_parts))
 
     return {
         "answer": "\n\n".join(answer_parts),
