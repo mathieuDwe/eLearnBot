@@ -211,6 +211,63 @@ def show():
                                 st.success(f"✅ {deleted} passages supprimés (cloud: {e}).")
                             st.rerun()
 
+        # ── Fichiers dans le bucket Supabase ────────────────────────────
+        with st.expander("☁️ Fichiers dans le bucket Supabase", expanded=False):
+            try:
+                from integrations.supabase_storage import SupabaseStorage
+                storage = SupabaseStorage()
+                bucket_files = storage.list_files()
+
+                if not bucket_files:
+                    st.caption("📭 Le bucket est vide.")
+                else:
+                    indexed_names = {d["filename"] for d in documents}
+                    for f in bucket_files:
+                        fname = f.get("name", "?")
+                        already_indexed = fname in indexed_names
+                        with st.container(border=True):
+                            col1, col2 = st.columns([3, 1])
+                            with col1:
+                                st.markdown(f"**{fname}**")
+                                if already_indexed:
+                                    st.caption("✅ Déjà indexé dans ChromaDB")
+                                else:
+                                    st.caption("⏳ Non indexé — cliquer pour restaurer")
+                            with col2:
+                                if already_indexed:
+                                    st.button(
+                                        "✅ Indexé",
+                                        disabled=True,
+                                        key=f"bucket_done_{fname}",
+                                    )
+                                else:
+                                    if st.button(
+                                        "📥 Restaurer",
+                                        key=f"restore_{fname}",
+                                    ):
+                                        # Télécharger depuis le bucket et ré-indexer
+                                        from core.pdf_extractor import extract_text_from_bytes
+                                        from core.rag_pipeline import index_document
+
+                                        file_bytes = storage.download_file(fname)
+                                        if file_bytes:
+                                            text = extract_text_from_bytes(file_bytes)
+                                            if text.strip():
+                                                doc_id = index_document(
+                                                    text=text,
+                                                    filename=fname,
+                                                    metadata={"content_type": "pdf", "restored": True},
+                                                )
+                                                st.success(f"✅ **{fname}** restauré et indexé !")
+                                                st.rerun()
+                                            else:
+                                                st.warning(f"⚠️ {fname} : texte vide (PDF scanné ?)")
+                                        else:
+                                            st.error(f"❌ Impossible de télécharger {fname}")
+
+            except Exception as e:
+                st.caption(f"⚠️ Bucket non accessible : {e}")
+
     # ── Onglet 3 : Paramètres ──────────────────────────────────────────
     with tab3:
         st.subheader("Paramètres du compte")
