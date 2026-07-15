@@ -41,26 +41,22 @@ def check_supabase_health() -> dict:
 
     try:
         client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
-        # Tester la connexion en listant les buckets
-        buckets = client.storage.list_buckets()
+        # Tester la connexion : lister le contenu du bucket 'cours'
+        bucket_ref = client.storage.from_(_BUCKET_NAME)
+        files = bucket_ref.list()
         result["supabase"] = True
-
-        # Vérifier si notre bucket existe
-        bucket_names = [b.get("name") if isinstance(b, dict) else getattr(b, "name", "") for b in buckets]
-        if _BUCKET_NAME in bucket_names:
-            result["bucket"] = True
-            # Compter les fichiers
-            try:
-                files = client.storage.from_(_BUCKET_NAME).list()
-                if isinstance(files, list):
-                    result["files_count"] = len(files)
-            except Exception:
-                pass
-        else:
-            result["error"] = f"Le bucket '{_BUCKET_NAME}' n'existe pas dans Supabase"
+        result["bucket"] = True
+        if isinstance(files, list):
+            result["files_count"] = len(files)
 
     except Exception as e:
-        result["error"] = str(e)
+        err_str = str(e)
+        if "bucket" in err_str.lower() or "not found" in err_str.lower() or "404" in err_str:
+            result["supabase"] = True  # Supabase fonctionne
+            result["bucket"] = False
+            result["error"] = f"Bucket '{_BUCKET_NAME}' introuvable"
+        else:
+            result["error"] = err_str[:80]
 
     return result
 
