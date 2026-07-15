@@ -18,15 +18,27 @@ _TABLE = "users"
 if _SUPABASE_URL.endswith("/rest/v1/"):
     _SUPABASE_URL = _SUPABASE_URL[: -len("/rest/v1/")]
 
+# Cache du client (persistance de connexion)
+_client_cache: Optional[Client] = None
+
 
 def _get_client() -> Client:
-    """Retourne le client Supabase."""
+    """Retourne le client Supabase (instance unique, persistante).
+
+    Le client est créé une seule fois et réutilisé pour éviter de
+    multiplier les connexions à chaque appel (Streamlit rerun).
+    """
+    global _client_cache
+    if _client_cache is not None:
+        return _client_cache
+
     if not _SUPABASE_URL or not _SUPABASE_KEY:
         raise RuntimeError(
             "Supabase non configuré. "
             "Définissez SUPABASE_URL et SUPABASE_KEY dans .env"
         )
-    return create_client(_SUPABASE_URL, _SUPABASE_KEY)
+    _client_cache = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+    return _client_cache
 
 
 # ── Rôles ──────────────────────────────────────────────────────────────────

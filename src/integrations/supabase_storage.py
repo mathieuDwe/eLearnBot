@@ -16,12 +16,17 @@ _BUCKET_NAME = "cours"
 if _SUPABASE_URL.endswith("/rest/v1/"):
     _SUPABASE_URL = _SUPABASE_URL[: -len("/rest/v1/")]
 
+# Cache du client (persistance de connexion)
+_client_cache: Optional[Client] = None
+
 
 class SupabaseStorage:
     """Client pour stocker les fichiers dans Supabase Storage."""
 
     def __init__(self):
         """Initialise le client Supabase.
+
+        Le client est créé une seule fois et réutilisé (singleton).
 
         Raises:
             ValueError: Si SUPABASE_URL ou SUPABASE_KEY ne sont pas configurés.
@@ -32,7 +37,11 @@ class SupabaseStorage:
                 "Définissez SUPABASE_URL et SUPABASE_KEY dans .env"
             )
 
-        self.client: Client = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+        global _client_cache
+        if _client_cache is None:
+            _client_cache = create_client(_SUPABASE_URL, _SUPABASE_KEY)
+
+        self.client: Client = _client_cache
         self.bucket = self.client.storage.from_(_BUCKET_NAME)
 
     def upload_file(
