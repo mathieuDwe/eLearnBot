@@ -27,6 +27,7 @@ def _make_token(user: dict) -> str:
     payload = {
         "username": user["username"],
         "role": user["role"],
+        "type": user.get("type", user["role"]),
         "exp": (datetime.utcnow() + timedelta(days=SESSION_DAYS)).isoformat(),
     }
     data = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
@@ -59,6 +60,7 @@ def _parse_token(token: str) -> Optional[dict]:
             "username": payload["username"],
             "name": payload["username"],
             "role": payload["role"],
+            "type": payload.get("type", payload["role"]),  # fallback vieux tokens
         }
     except Exception:
         return None
@@ -90,6 +92,10 @@ def inject_cookie_check():
 
     Le JS vérifie que 'session_token' n'est pas déjà dans l'URL
     pour éviter les boucles de redirection.
+    Si le cookie est trouvé, le navigateur est redirigé vers
+    la même URL avec ?session_token=<token> pour que Streamlit
+    puisse le lire côté serveur.
+    Si aucun cookie n'est trouvé, rien ne se passe.
     """
     st.markdown(
         f"""<script>

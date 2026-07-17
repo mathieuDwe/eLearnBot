@@ -369,34 +369,38 @@ def show():
                 f"dernière vérification : {status['last_checked'][:19]} UTC"
             )
 
-        # ── Informations stockage ───────────────────────────────────────
+        # ── Informations stockage cloud ─────────────────────────────────
         st.markdown("---")
-        with st.expander("💾 Informations sur le stockage", expanded=True):
-            from core.document_store import _DATA_DIR
-            data_path = os.path.abspath(_DATA_DIR)
-            data_size = 0
-            for dirpath, _, filenames in os.walk(data_path):
-                for f in filenames:
-                    fp = os.path.join(dirpath, f)
-                    data_size += os.path.getsize(fp)
+        with st.expander("☁️ Informations sur le stockage cloud", expanded=True):
+            from core.document_store import is_cloud_configured
+            cloud_ok = is_cloud_configured()
 
             docs = get_available_documents()
             total_chunks = sum(d.get("chunks", 0) for d in docs)
 
-            st.markdown(f"""
-            | Élément | Emplacement / Valeur |
-            |---|---|
-            | 📂 **Données** | `{data_path}/` |
-            | 💾 **Taille sur disque** | `{_format_size(data_size)}` |
-            | 📚 **Cours indexés** | `{len(docs)}` |
-            | 🔢 **Total passages** | `{total_chunks}` |
-            | 🗑️ **Fichiers temporaires** | Supprimés après indexation |
-            """)
-
-            st.caption(
-                "💡 Les documents sont stockés dans un fichier JSON. "
-                "Un backup est sauvegardé dans Supabase Storage."
-            )
+            if cloud_ok:
+                st.markdown(f"""
+                | Élément | Valeur |
+                |---|---|
+                | ☁️ **Stockage** | Supabase Storage (bucket `cours`) |
+                | 📚 **Cours indexés** | `{len(docs)}` |
+                | 🔢 **Total passages** | `{total_chunks}` |
+                | 🔄 **Persistance** | Immédiate (chaque écriture sync) |
+                """)
+                st.success("✅ Stockage cloud actif — données persistées dans Supabase.")
+            else:
+                st.markdown(f"""
+                | Élément | Valeur |
+                |---|---|
+                | 📚 **Cours indexés** | `{len(docs)}` (session uniquement) |
+                | 🔢 **Total passages** | `{total_chunks}` |
+                | ⚠️ **Persistance** | Aucune (mode mémoire) |
+                """)
+                st.warning(
+                    "⚠️ Supabase non configuré. Les données ne sont pas persistées "
+                    "entre les sessions. Configurez SUPABASE_URL et SUPABASE_KEY "
+                    "dans les secrets Streamlit."
+                )
 
 
 # ── Fonction utilitaire partagée ─────────────────────────────────────────
@@ -441,16 +445,17 @@ def _index_and_store(
     except Exception as e:
         st.warning(f"⚠️ Supabase : {e}")
 
-    # ── Logs de stockage ────────────────────────────────────────────
-    abs_tmp = os.path.abspath(tmp_path)
-    from core.document_store import _DATA_DIR
-    data_abs = os.path.abspath(_DATA_DIR)
+    # ── Logs de stockage cloud ──────────────────────────────────────
+    from core.document_store import is_cloud_configured
+    cloud_ok = is_cloud_configured()
+    cloud_status = (
+        "☁️ Données persistées dans Supabase Storage."
+        if cloud_ok
+        else "⚠️ Supabase non configuré — données en mémoire uniquement."
+    )
     st.info(
-        f"📂 **Fichier temporaire :** `{abs_tmp}`\n\n"
-        f"🗑️ Sera supprimé après indexation.\n\n"
-        f"💾 **Stockage local :** `{data_abs}/`\n\n"
-        f"📦 Les données sont persistées dans le fichier JSON local "
-        f"et sauvegardées dans Supabase Storage.\n\n"
+        f"📂 **Fichier :** `{filename}`\n\n"
+        f"📦 {cloud_status}\n\n"
         f"🧬 **Hash :** `{content_hash[:16]}...`"
     )
 

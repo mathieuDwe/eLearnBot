@@ -1,10 +1,12 @@
-"""Fixtures partagées pour tous les tests eLearnBot."""
+"""Fixtures partagées pour tous les tests eLearnBot.
+
+Les tests utilisent le mode mémoire du document_store (pas de cloud).
+Les données sont réinitialisées entre chaque test via force_in_memory_mode().
+"""
 
 import importlib
 import os
-import shutil
 import sys
-import tempfile
 
 import pytest
 
@@ -17,29 +19,29 @@ os.environ["SUPABASE_URL"] = ""
 os.environ["SUPABASE_KEY"] = ""
 
 
-@pytest.fixture
-def tmp_data_dir():
-    """Crée un répertoire data temporaire isolé pour chaque test.
+@pytest.fixture(autouse=True)
+def reset_document_store():
+    """Réinitialise le document_store en mode mémoire avant chaque test.
 
-    Nettoie automatiquement après le test.
-    Surcharge DATA_DIR et recharge document_store pour éviter les caches.
+    Cette fixture est automatique (autouse=True) : elle s'exécute pour
+    tous les tests sans avoir besoin d'être déclarée explicitement.
+    Le cache mémoire est vidé, et Supabase est désactivé.
     """
-    tmpdir = tempfile.mkdtemp()
-    old_data_dir = os.environ.get("DATA_DIR")
-    os.environ["DATA_DIR"] = tmpdir
-
-    # Recharger pour prendre en compte le nouveau DATA_DIR
     from core import document_store
     importlib.reload(document_store)
+    document_store.force_in_memory_mode()
+    yield
 
-    yield tmpdir
 
-    # Nettoyage
-    shutil.rmtree(tmpdir, ignore_errors=True)
-    if old_data_dir:
-        os.environ["DATA_DIR"] = old_data_dir
-    else:
-        os.environ.pop("DATA_DIR", None)
+@pytest.fixture
+def empty_doc_store():
+    """Retourne le module document_store en mode mémoire (prêt à l'emploi).
+
+    Les documents ajoutés restent en mémoire le temps du test.
+    Aucune persistance cloud ni fichier local.
+    """
+    from core import document_store
+    return document_store
 
 
 @pytest.fixture
@@ -58,13 +60,6 @@ def sample_text():
         "Par exemple, si un triangle a des côtés de longueur 3 et 4, "
         "l'hypoténuse mesurera 5 (car 3² + 4² = 9 + 16 = 25 = 5²)."
     )
-
-
-@pytest.fixture
-def empty_doc_store(tmp_data_dir):
-    """Retourne le module document_store avec un data_dir vide."""
-    from core import document_store
-    return document_store
 
 
 @pytest.fixture

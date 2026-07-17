@@ -52,9 +52,10 @@ def session():
 
 
 @pytest.fixture
-def doc_store(tmp_data_dir):
-    """Module document_store avec data_dir temporaire."""
+def doc_store():
+    """Module document_store en mode mémoire."""
     from core import document_store
+    document_store.force_in_memory_mode()
     return document_store
 
 

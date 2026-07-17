@@ -9,7 +9,7 @@ import os
 import streamlit as st
 
 from core.auth import init_session, is_authenticated, get_current_user, logout_user, login_user
-from core.document_store import load_from_cloud
+from core.document_store import sync_from_cloud
 from core.session import try_auto_login, inject_cookie_check
 from core.reindexer import auto_reindex_on_startup
 from integrations.supabase_storage import check_supabase_health
@@ -22,6 +22,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
+def _show_loading_screen():
+    """Affiche un écran de chargement minimal pendant la vérification du cookie.
+
+    L'écran est volontairement simple et rapide à rendre :
+    pas de composants lourds, pas d'appels réseau.
+    Il disparaît dès que le JS a redirigé ou que le rerun s'exécute.
+    """
+    st.markdown("### 🎓 eLearnBot")
+    st.info("🔍 Vérification de votre session...")
+
+
 # Initialiser la session (authentification, etc.)
 init_session()
 
@@ -31,13 +43,20 @@ auto_user = try_auto_login()
 if auto_user and not is_authenticated():
     login_user(auto_user)
 
-# Injecte le script de lecture du cookie (pour les redémarrages)
-if not is_authenticated():
+# Évite le flash de la page login :
+#   1ʳᵉ visite → injecte le JS cookie + écran de chargement
+#   Si cookie valide → JS redirige vers ?session_token=... → auto-login
+#   Si pas de cookie → JS redirige vers ?_cookie_done=1 → formulaire login
+# La page login n'est jamais rendue avant la redirection JS.
+if not is_authenticated() and "_cookie_attempted" not in st.session_state:
+    st.session_state._cookie_attempted = True
     inject_cookie_check()
+    _show_loading_screen()
+    st.rerun()
 
-# ── Initialisation des connexions persistantes ────────────────────────────
-with st.spinner("🔄 Restauration des documents..."):
-    load_from_cloud()
+# ── Initialisation : sync depuis le cloud ────────────────────────────────
+with st.spinner("☁️ Synchronisation des documents depuis le cloud..."):
+    sync_from_cloud()
 
 # ── Ré-indexation automatique (une seule fois par session) ──────────────
 if "_auto_reindex_done" not in st.session_state:
@@ -97,25 +116,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Sidebar ───────────────────────────────────────────────────────────────
-col_logo, col_title = st.sidebar.columns([1, 3])
-with col_logo:
-    st.image(
-        "https://img.icons8.com/fluency/96/books.png",
-        width=70,
-    )
-with col_title:
-    st.markdown("## 🎓 eLearnBot")
 
-# ── Indicateurs d'état des connexions ────────────────────────────────
-with st.sidebar:
-    st.divider()
-    st.caption("🔌 **Connexions**")
+# ── Indicateurs d'état des connexions (admin uniquement, connecté uniquement) ─
+def _show_connection_status():
+    """Affiche les indicateurs d'état des connexions.
 
-    # Supabase — test réel (check à chaque chargement, rafraîchi au rerun)
+    N'affiche rien si Supabase n'est pas connecté (silencieux).
+    Réservé aux admins (appel conditionnel dans la sidebar).
+    """
     health = check_supabase_health()
+    if not health["supabase"]:
+        return  # Pas de connexion → rien n'est affiché
 
-    if health["supabase"]:
+    with st.sidebar:
+        st.divider()
+        st.caption("🔌 **Connexions**")
+
         st.caption("✅ **Supabase** — connectée")
         if health["bucket"]:
             st.caption(f"📦 **Bucket** `{health['bucket_name']}` — {health['files_count']} fichier(s)")
@@ -136,26 +152,37 @@ with st.sidebar:
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Création échouée : {e}")
-    else:
-        err = health.get("error", "")
-        st.caption(f"❌ **Supabase** — {err[:60]}")
 
-    # Documents
-    from core.document_store import count_documents
-    nb_docs = count_documents()
-    if nb_docs > 0:
-        st.caption(f"📚 **Documents** — {nb_docs} cours indexés")
-    else:
-        st.caption("ℹ️ **Documents** — aucun cours indexé")
-    st.divider()
+        # Documents
+        from core.document_store import count_documents
+        nb_docs = count_documents()
+        if nb_docs > 0:
+            st.caption(f"📚 **Documents** — {nb_docs} cours indexés")
+        else:
+            st.caption("ℹ️ **Documents** — aucun cours indexé")
+        st.divider()
 
-# ── Affichage selon authentification ──────────────────────────────────────
+
+# ── Sidebar (authentifié uniquement) ──────────────────────────────────────
 if is_authenticated():
     user = get_current_user()
+    role = user["role"]
+    user_type = user.get("type", role)  # type de la table (admin/professeur/eleve)
+
+    col_logo, col_title = st.sidebar.columns([1, 3])
+    with col_logo:
+        st.image(
+            "https://img.icons8.com/fluency/96/books.png",
+            width=70,
+        )
+    with col_title:
+        st.markdown("## 🎓 eLearnBot")
+
+    # ── Connexions : uniquement pour les admins (basé sur le type) ────
+    if user_type == "admin":
+        _show_connection_status()
 
     # ── Navigation ────────────────────────────────────────────────────
-    role = user["role"]
-
     pages_config = {
         "admin": [
             ("🏠", "Accueil", "accueil"),

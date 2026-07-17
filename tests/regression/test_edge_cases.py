@@ -1,8 +1,5 @@
 """🧪 Tests de non-régression — Cas aux limites, résilience, scénarios d'erreur."""
 
-import os
-import tempfile
-
 import pytest
 
 
@@ -230,71 +227,36 @@ class TestReindexerResilience:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Résilience — corruption du fichier JSON
+# Résilience — mode mémoire (stockage cloud uniquement)
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestJSONResilience:
-    """Comportement face à un fichier documents.json corrompu."""
+class TestCloudOnlyResilience:
+    """Comportement du stockage cloud-only."""
 
-    def test_corrupted_json(self, tmp_data_dir):
-        """Fichier JSON corrompu → chargement silencieux (liste vide)."""
-        import json
-        from core import document_store
-        import importlib
-        importlib.reload(document_store)
+    def test_force_in_memory_mode(self, empty_doc_store):
+        """force_in_memory_mode vide le cache."""
+        ds = empty_doc_store
+        ds.add_document(text="Test", filename="doc.pdf", metadata={})
+        assert ds.count_documents() == 1
+        ds.force_in_memory_mode()
+        assert ds.count_documents() == 0
 
-        # Écrire un JSON invalide
-        data_file = os.path.join(tmp_data_dir, "documents.json")
-        with open(data_file, "w") as f:
-            f.write("{ceci n'est pas du json valide!!")
+    def test_cloud_not_configured(self, empty_doc_store):
+        """is_cloud_configured → False (tests sans Supabase)."""
+        assert empty_doc_store.is_cloud_configured() is False
 
-        docs = document_store.get_documents_list()
-        assert docs == []
+    def test_docs_survive_add_delete_in_memory(self, empty_doc_store):
+        """Ajout et suppression dans le cache mémoire."""
+        ds = empty_doc_store
+        ds.add_document(text="Doc A", filename="a.pdf", metadata={})
+        ds.add_document(text="Doc B", filename="b.pdf", metadata={})
+        assert ds.count_documents() == 2
+        ds.delete_document("a.pdf")
+        assert ds.count_documents() == 1
+        assert ds.get_document_by_filename("b.pdf") is not None
 
-    def test_empty_json_file(self, tmp_data_dir):
-        """Fichier JSON vide → liste vide."""
-        from core import document_store
-        import importlib
-        importlib.reload(document_store)
-
-        data_file = os.path.join(tmp_data_dir, "documents.json")
-        with open(data_file, "w") as f:
-            f.write("")
-
-        docs = document_store.get_documents_list()
-        assert docs == []
-
-    def test_json_not_a_list(self, tmp_data_dir):
-        """JSON valide mais pas une liste → liste vide."""
-        import json
-        from core import document_store
-        import importlib
-        importlib.reload(document_store)
-
-        data_file = os.path.join(tmp_data_dir, "documents.json")
-        with open(data_file, "w") as f:
-            json.dump({"not_a_list": True}, f)
-
-        # _load_documents tente json.load → retourne un dict, puis
-        # la boucle dans get_documents_list échoue. Vérifions la résilience.
-        docs = document_store.get_documents_list()
-        assert docs == []
-
-    def test_json_with_missing_keys(self, tmp_data_dir):
-        """Documents avec clés manquantes → pas de crash."""
-        import json
-        from core import document_store
-        import importlib
-        importlib.reload(document_store)
-
-        data_file = os.path.join(tmp_data_dir, "documents.json")
-        with open(data_file, "w") as f:
-            json.dump([
-                {"id": "1", "filename": "ok.pdf", "text": "contenu",
-                 "chunks": ["contenu"], "chunks_count": 1, "metadata": {}},
-                {"id": "2", "filename": "no_text.pdf"},  # clés manquantes
-            ], f)
-
-        docs = document_store.get_documents_list()
-        assert len(docs) >= 1
-        # Le document avec clés manquantes ne devrait pas crasher
+    def test_sync_from_cloud_no_config(self, empty_doc_store):
+        """sync_from_cloud sans Supabase → pas d'erreur, cache vide."""
+        ds = empty_doc_store
+        ds.sync_from_cloud()  # Ne doit pas crasher
+        assert ds.count_documents() == 0

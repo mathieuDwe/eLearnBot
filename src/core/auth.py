@@ -157,6 +157,7 @@ def register_user(
                 "username": username,
                 "name": username,
                 "role": role,
+                "type": role,
             },
         }
     except Exception as e:
@@ -198,6 +199,7 @@ def authenticate_user(username: str, password: str) -> dict:
                     "username": user["username"],
                     "name": user["username"],  # Pas de colonne 'name'
                     "role": user["type"],
+                    "type": user["type"],
                 },
             }
         else:
@@ -292,6 +294,7 @@ def get_all_users() -> list[dict]:
                 "username": u["username"],
                 "name": u["username"],   # Pas de colonne 'name'
                 "role": u["type"],
+                "type": u["type"],
                 "created_at": "",
             })
         return users

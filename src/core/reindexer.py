@@ -1,7 +1,7 @@
 """🔄 Ré-indexation automatique des cours.
 
 Maintient la synchronisation entre le stockage cloud (Supabase Storage)
-et l'index local (documents.json). Détecte automatiquement :
+et l'index en mémoire (document_store). Détecte automatiquement :
 
 - **Nouveaux fichiers** dans Supabase → les indexe
 - **Fichiers modifiés** (hash différent) → ré-indexe
