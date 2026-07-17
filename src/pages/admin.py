@@ -15,6 +15,12 @@ from core.auth import (
 )
 from core.rag_pipeline import get_available_documents
 from core.document_store import delete_document as delete_doc_store
+from core.reindexer import (
+    check_sync_status,
+    reindex_all,
+    reindex_file,
+    format_sync_summary,
+)
 
 
 def show():
@@ -31,10 +37,11 @@ def show():
     )
 
     # ── Onglets ─────────────────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Tableau de bord",
         "👥 Utilisateurs",
         "📚 Cours",
+        "🔄 Synchronisation",
     ])
 
     # ── Onglet 1 : Dashboard ────────────────────────────────────────────
@@ -201,9 +208,10 @@ def show():
                 meta = doc.get("metadata", {})
                 content_type = meta.get("content_type", "pdf")
                 icon = "🎬" if content_type == "mp4" else "📄"
+                content_hash = doc.get("content_hash") or meta.get("content_hash", "")
 
                 with st.container(border=True):
-                    col1, col2, col3 = st.columns([3, 1, 1])
+                    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                     with col1:
                         st.markdown(f"**{icon} {doc['filename']}**")
                         info = f"🔢 {doc['chunks']} passages"
@@ -211,6 +219,8 @@ def show():
                             duration = meta.get("duration_display", "")
                             if duration:
                                 info += f" | 🎬 {duration}"
+                        if content_hash:
+                            info += f" | 🧬 `{content_hash[:10]}...`"
                         st.caption(info)
                     with col2:
                         if content_type == "mp4":
@@ -218,6 +228,11 @@ def show():
                         else:
                             st.markdown("📄 PDF")
                     with col3:
+                        if content_hash:
+                            st.markdown("✅ Versionné")
+                        else:
+                            st.markdown("⚠️ Non versionné")
+                    with col4:
                         if st.button(
                             "🗑️ Supprimer",
                             key=f"admin_del_{doc['filename']}",
@@ -236,6 +251,145 @@ def show():
 
             st.divider()
             st.caption(f"Total : **{len(documents)}** cours indexés")
+
+    # ── Onglet 4 : Synchronisation ───────────────────────────────────────
+    with tab4:
+        st.subheader("🔄 Synchronisation cloud ↔ index local")
+        st.markdown(
+            "Tous les fichiers présents dans Supabase Storage sont "
+            "**automatiquement ré-indexés** sans action manuelle. "
+            "Cette page vous donne la visibilité sur l'opération."
+        )
+
+        # ── Ré-indexation automatique (une fois par session) ─────────────
+        if "_auto_reindex_admin" not in st.session_state:
+            st.session_state._auto_reindex_admin = True
+            status = check_sync_status()
+            if status["new_files"] or status["modified_files"]:
+                with st.spinner("🔄 Synchronisation automatique avec Supabase..."):
+                    report = reindex_all()
+                if report["total_processed"] > 0:
+                    n_new = len(report.get("indexed", []))
+                    n_upd = len(report.get("updated", []))
+                    n_err = len(report.get("errors", []))
+                    if n_new:
+                        st.toast(f"📥 {n_new} nouveau(x) fichier(s) indexé(s) depuis Supabase")
+                    if n_upd:
+                        st.toast(f"🔄 {n_upd} fichier(s) mis à jour")
+                    if n_err:
+                        st.toast(f"❌ {n_err} erreur(s) lors de la synchronisation")
+                st.rerun()
+
+        # ── Statut actuel ────────────────────────────────────────────────
+        status = check_sync_status()
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("☁️ Fichiers Supabase", status["total_in_supabase"])
+        col2.metric("📚 Indexés localement", status["total_indexed"])
+        diff = status["total_in_supabase"] - status["total_indexed"]
+        delta_color = "inverse" if diff > 0 else "normal"
+        col3.metric("📥 Non indexés", max(0, diff), delta_color=delta_color)
+        col4.metric("✅ Synchronisés", len(status["synced_files"]))
+
+        st.markdown("---")
+
+        # ── Nouveaux fichiers ────────────────────────────────────────────
+        with st.expander(
+            f"🆕 Nouveaux fichiers ({len(status['new_files'])})",
+            expanded=False,
+        ):
+            if not status["new_files"]:
+                st.success("✅ Aucun nouveau fichier à indexer")
+            else:
+                for f in status["new_files"]:
+                    size_kb = f.get("size", 0) / 1024
+                    st.markdown(
+                        f"- **{f['name']}** ({size_kb:.1f} Ko) "
+                        f"— mis à jour : {str(f.get('updated_at', '?'))[:19]}"
+                    )
+
+        # ── Fichiers modifiés ────────────────────────────────────────────
+        with st.expander(
+            f"🔄 Fichiers modifiés ({len(status['modified_files'])})",
+            expanded=False,
+        ):
+            if not status["modified_files"]:
+                st.success("✅ Aucun fichier modifié")
+            else:
+                for f in status["modified_files"]:
+                    st.markdown(
+                        f"- **{f['name']}** — "
+                        f"ancien hash: `{f['old_hash'][:12]}...` "
+                        f"→ nouveau: `{f['new_hash'][:12]}...`"
+                    )
+
+        # ── Fichiers manquants ───────────────────────────────────────────
+        with st.expander(
+            f"🗑️ Fichiers manquants ({len(status['missing_files'])})",
+        ):
+            if not status["missing_files"]:
+                st.success("✅ Aucun fichier manquant dans Supabase")
+            else:
+                st.warning(
+                    "Ces fichiers sont dans l'index local mais n'existent "
+                    "plus dans Supabase Storage."
+                )
+                for fname in status["missing_files"]:
+                    col_a, col_b = st.columns([3, 1])
+                    with col_a:
+                        st.markdown(f"- **{fname}**")
+                    with col_b:
+                        if st.button(
+                            "🗑️ Supprimer de l'index",
+                            key=f"del_missing_{fname}",
+                            use_container_width=True,
+                        ):
+                            delete_doc_store(fname)
+                            st.success(f"✅ {fname} supprimé de l'index")
+                            st.rerun()
+
+        # ── Forcer une ré-indexation complète (action manuelle avancée) ──
+        with st.expander("🔧 Actions avancées", expanded=False):
+            st.warning(
+                "En temps normal, la synchronisation est automatique. "
+                "Utilisez ces actions uniquement en cas de besoin."
+            )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if st.button(
+                    "🔄 Re-vérifier maintenant",
+                    use_container_width=True,
+                ):
+                    st.rerun()
+            with col_b:
+                if st.button(
+                    "📥 Ré-indexation complète de tous les fichiers",
+                    use_container_width=True,
+                    help="Télécharge et ré-indexe tous les fichiers depuis Supabase",
+                ):
+                    storage_files = []
+                    try:
+                        from integrations.supabase_storage import SupabaseStorage
+                        s = SupabaseStorage()
+                        storage_files = [
+                            f["name"] for f in s.list_files()
+                            if f["name"].lower().endswith((".pdf", ".mp4"))
+                        ]
+                    except Exception:
+                        st.error("Impossible de lister Supabase")
+
+                    if storage_files:
+                        with st.spinner(
+                            f"Ré-indexation de {len(storage_files)} fichier(s)..."
+                        ):
+                            report = reindex_all(storage_files)
+                        st.success(
+                            f"✅ {report['total_success']} fichier(s) traités, "
+                            f"{report['total_errors']} erreur(s)"
+                        )
+                        st.rerun()
+
+        st.caption(f"Dernière vérification : {status['last_checked'][:19]} UTC")
 
     # ── Footer ──────────────────────────────────────────────────────────
     st.markdown("---")

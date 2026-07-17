@@ -11,6 +11,7 @@ import streamlit as st
 from core.auth import init_session, is_authenticated, get_current_user, logout_user, login_user
 from core.document_store import load_from_cloud
 from core.session import try_auto_login, inject_cookie_check
+from core.reindexer import auto_reindex_on_startup
 from integrations.supabase_storage import check_supabase_health
 
 # ── Configuration de la page ──────────────────────────────────────────────
@@ -37,6 +38,25 @@ if not is_authenticated():
 # ── Initialisation des connexions persistantes ────────────────────────────
 with st.spinner("🔄 Restauration des documents..."):
     load_from_cloud()
+
+# ── Ré-indexation automatique (une seule fois par session) ──────────────
+if "_auto_reindex_done" not in st.session_state:
+    st.session_state._auto_reindex_done = True
+    report = auto_reindex_on_startup()
+    if report.get("total_processed", 0) > 0:
+        n_new = len(report.get("indexed", []))
+        n_upd = len(report.get("updated", []))
+        n_err = len(report.get("errors", []))
+        parts = []
+        if n_new:
+            parts.append(f"📥 {n_new} nouveau(x) indexé(s)")
+        if n_upd:
+            parts.append(f"🔄 {n_upd} mis à jour")
+        if n_err:
+            parts.append(f"❌ {n_err} erreur(s)")
+        st.toast(f"🔁 Auto-réindexation : {', '.join(parts)}")
+    elif report.get("message"):
+        pass  # Silencieux si tout est à jour
 
 # ── CSS personnalisé ──────────────────────────────────────────────────────
 st.markdown("""

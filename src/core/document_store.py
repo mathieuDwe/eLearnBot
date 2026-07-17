@@ -1,8 +1,12 @@
 """💾 Stockage documentaire JSON (remplace ChromaDB).
 
 Stocke les textes extraits et métadonnées dans un fichier JSON local.
-Avec backup/restore vers Supabase Storage pour la persistance cloud."""
+Avec backup/restore vers Supabase Storage pour la persistance cloud.
 
+Chaque document stocke un `content_hash` (SHA256 du fichier source)
+pour détecter les modifications et déclencher une ré-indexation automatique."""
+
+import hashlib
 import json
 import os
 import re
@@ -15,6 +19,8 @@ _DATA_DIR = os.getenv("DATA_DIR", "./data")
 _DOCUMENTS_FILE = os.path.join(_DATA_DIR, "documents.json")
 _CLOUD_BACKUP_KEY = "documents_backup.json"
 
+_HASH_ALGORITHM = "sha256"  # Algorithme de hachage pour le suivi des versions
+
 # ── Mots vides pour la recherche ─────────────────────────────────────────
 _STOPWORDS = {
     "dans", "avec", "cette", "entre", "avoir", "faire", "tout", "plus",
@@ -23,19 +29,30 @@ _STOPWORDS = {
     "vous", "elles", "ils", "elle", "quel", "quels", "quelle", "quelles",
     "parce", "comme", "chez", "sans", "dans", "avec", "aussi", "ni",
     "car", "où", "dont", "depuis", "pendant", "quand", "après", "avant",
+    "les", "des", "une", "cet", "celle", "ceux", "aux",
 }
 
 
 # ── Gestion du fichier JSON local ───────────────────────────────────────
 
 def _load_documents() -> list[dict]:
-    """Charge la liste des documents depuis le fichier JSON local."""
+    """Charge la liste des documents depuis le fichier JSON local.
+
+    Retourne [] si :
+      - Le fichier n'existe pas
+      - Le JSON est invalide (corrompu)
+      - La racine n'est pas une liste (résilience)
+    """
     if not os.path.exists(_DOCUMENTS_FILE):
         return []
     try:
         with open(_DOCUMENTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
+            data = json.load(f)
+        if not isinstance(data, list):
+            # Fichier JSON valide mais pas une liste → silencieux
+            return []
+        return data
+    except (json.JSONDecodeError, FileNotFoundError, ValueError):
         return []
 
 
@@ -92,19 +109,52 @@ def load_from_cloud():
 
 # ── API publique ─────────────────────────────────────────────────────────
 
+def compute_content_hash(file_bytes: bytes) -> str:
+    """Calcule le hash SHA256 d'un fichier pour le suivi de version.
+
+    Args:
+        file_bytes: Contenu du fichier en bytes.
+
+    Returns:
+        Empreinte hexadécimale SHA256.
+    """
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
+def get_document_by_filename(filename: str) -> Optional[dict]:
+    """Retourne un document complet par son nom de fichier.
+
+    Args:
+        filename: Nom du fichier recherché.
+
+    Returns:
+        Dict complet du document, ou None si introuvable.
+    """
+    docs = _load_documents()
+    for d in docs:
+        if d["filename"] == filename:
+            return d
+    return None
+
+
 def add_document(
     text: str,
     filename: str,
     metadata: dict = None,
+    content_hash: str = None,
 ) -> str:
     """Ajoute un document à la base locale.
 
     Découpe le texte en chunks et stocke le tout dans le JSON.
+    Si un document avec le même ``filename`` existe déjà, il est
+    remplacé (mise à jour). Le ``content_hash`` permet de détecter
+    les modifications du fichier source.
 
     Args:
         text: Texte complet du document.
         filename: Nom du fichier.
         metadata: Métadonnées additionnelles.
+        content_hash: Empreinte SHA256 du fichier source (optionnel).
 
     Returns:
         ID du document.
@@ -114,6 +164,15 @@ def add_document(
 
     # Découper en chunks
     chunks = chunk_text(text)
+
+    # Ajouter le hash de contenu au metadata pour le suivi de version
+    # Priorité au paramètre explicite, sinon on lit depuis metadata
+    if content_hash:
+        metadata["content_hash"] = content_hash
+        metadata["hash_algorithm"] = _HASH_ALGORITHM
+    elif "content_hash" in metadata:
+        # Déjà présent dans metadata (ex: upload depuis professeur)
+        metadata.setdefault("hash_algorithm", _HASH_ALGORITHM)
 
     doc = {
         "id": doc_id,
@@ -159,18 +218,29 @@ def delete_document(filename: str) -> int:
 def get_documents_list() -> list[dict]:
     """Retourne la liste des documents disponibles.
 
+    Ignore silencieusement les documents corrompus (clés manquantes).
+
     Returns:
         Liste de dicts avec les infos des documents.
+        Chaque entrée contient 'filename', 'chunks', 'metadata'
+        et éventuellement 'content_hash'.
     """
     docs = _load_documents()
-    return [
-        {
-            "filename": d["filename"],
-            "chunks": d["chunks_count"],
-            "metadata": d["metadata"],
-        }
-        for d in docs
-    ]
+    result = []
+    for d in docs:
+        try:
+            meta = d.get("metadata") or {}
+            result.append({
+                "filename": d.get("filename", "inconnu"),
+                "chunks": d.get("chunks_count", 0),
+                "text_length": len(d.get("text", "")),
+                "metadata": meta,
+                "content_hash": meta.get("content_hash"),
+            })
+        except (TypeError, ValueError, AttributeError):
+            # Document corrompu → ignoré silencieusement
+            continue
+    return result
 
 
 def search(
@@ -262,6 +332,9 @@ def _format_size(size_bytes: int) -> str:
 def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
     """Découpe un texte en chunks de taille fixe avec recouvrement.
 
+    Garantit que la progression est toujours > 0 pour éviter les boucles
+    infinies. Si overlap >= chunk_size, overlap est réduit à chunk_size - 1.
+
     Args:
         text: Texte à découper.
         chunk_size: Nombre de mots par chunk.
@@ -273,15 +346,23 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]
     words = text.split()
     chunks = []
 
+    if not words:
+        return [""]
+
     if len(words) <= chunk_size:
         return [text]
 
+    # Sécurité : la progression doit être au moins 1
+    step = max(chunk_size - overlap, 1)
+
     start = 0
     while start < len(words):
-        end = start + chunk_size
+        end = min(start + chunk_size, len(words))
         chunk = " ".join(words[start:end])
         chunks.append(chunk)
-        start += chunk_size - overlap
+        if end >= len(words):
+            break
+        start += step
 
     return chunks
 

@@ -13,6 +13,12 @@ from core import response_cache
 from core.document_store import delete_document as delete_doc_store
 from integrations.supabase_storage import SupabaseStorage
 
+from core.reindexer import (
+    check_sync_status,
+    reindex_all,
+    format_sync_summary,
+)
+
 
 def _format_size(size_bytes: int) -> str:
     """Formate une taille en bytes vers une lisible (Ko, Mo)."""
@@ -167,6 +173,33 @@ def show():
     with tab2:
         st.subheader("Cours indexés")
 
+        # ── Ré-indexation automatique depuis Supabase ────────────────────
+        # Se déclenche tout seul : pas besoin de bouton, ça se fait
+        # à chaque fois que la page est chargée (une seule fois par session
+        # utilisateur, grâce au flag _auto_synced).
+        if "_auto_reindex_prof" not in st.session_state:
+            st.session_state._auto_reindex_prof = True
+            status = check_sync_status()
+            if status["new_files"] or status["modified_files"]:
+                with st.spinner("🔄 Synchronisation automatique avec Supabase..."):
+                    report = reindex_all()
+                if report["total_processed"] > 0:
+                    n_new = len(report.get("indexed", []))
+                    n_upd = len(report.get("updated", []))
+                    n_err = len(report.get("errors", []))
+                    if n_new:
+                        st.toast(f"📥 {n_new} nouveau(x) cours indexé(s) depuis Supabase")
+                    if n_upd:
+                        st.toast(f"🔄 {n_upd} cours mis à jour depuis Supabase")
+                    if n_err:
+                        st.toast(f"❌ {n_err} erreur(s) lors de la synchro")
+                st.rerun()
+
+        # ── Barre d'état de synchronisation ──────────────────────────────
+        with st.container(border=True):
+            status = check_sync_status()
+            st.caption(format_sync_summary(status))
+
         documents = get_available_documents()
 
         if not documents:
@@ -179,6 +212,7 @@ def show():
                 meta = doc.get("metadata", {})
                 content_type = meta.get("content_type", "pdf")
                 icon = "🎬" if content_type == "mp4" else "📄"
+                content_hash = doc.get("content_hash") or meta.get("content_hash", "")
 
                 with st.container(border=True):
                     col1, col2 = st.columns([3, 1])
@@ -192,6 +226,8 @@ def show():
                                 if duration
                                 else ""
                             )
+                        if content_hash:
+                            chunks_info += " · ✅ Versionné"
                         st.caption(chunks_info)
                     with col2:
                         if st.button(
@@ -301,6 +337,38 @@ def show():
             st.success("✅ Cache vidé !")
             st.rerun()
 
+        # ── Synchronisation ───────────────────────────────────────────────
+        st.markdown("---")
+        with st.expander("🔄 Synchronisation cloud", expanded=False):
+            status = check_sync_status()
+            st.markdown(format_sync_summary(status))
+
+            if status["new_files"]:
+                st.markdown("#### 🆕 Nouveaux fichiers à indexer")
+                for f in status["new_files"]:
+                    st.markdown(f"- **{f['name']}** ({f.get('size', 0) / 1024:.1f} Ko)")
+
+            if status["modified_files"]:
+                st.markdown("#### 🔄 Fichiers modifiés (ré-indexation nécessaire)")
+                for f in status["modified_files"]:
+                    st.markdown(f"- **{f['name']}** — hash changé")
+
+            if status["missing_files"]:
+                st.markdown("#### 🗑️ Fichiers supprimés de Supabase")
+                for fname in status["missing_files"]:
+                    st.markdown(f"- **{fname}** — plus présent dans le cloud")
+
+            if status["synced_files"]:
+                st.markdown(f"✅ **{len(status['synced_files'])}** fichier(s) à jour")
+
+            if not status["new_files"] and not status["modified_files"]:
+                st.success("✅ Tout est synchronisé automatiquement.")
+
+            st.caption(
+                f"🔄 La synchronisation est automatique — "
+                f"dernière vérification : {status['last_checked'][:19]} UTC"
+            )
+
         # ── Informations stockage ───────────────────────────────────────
         st.markdown("---")
         with st.expander("💾 Informations sur le stockage", expanded=True):
@@ -343,6 +411,9 @@ def _index_and_store(
 ):
     """Indexe le texte dans le stockage local.
 
+    Calcule le hash du fichier source pour permettre la détection
+    automatique des modifications futures (ré-indexation).
+
     Args:
         tmp_path: Chemin du fichier temporaire.
         filename: Nom d'affichage.
@@ -353,6 +424,13 @@ def _index_and_store(
     metadata = metadata or {}
     metadata["content_type"] = content_type
     metadata["size"] = os.path.getsize(tmp_path)
+
+    # ── Calcul du hash du fichier source ─────────────────────────────
+    from core.document_store import compute_content_hash
+    with open(tmp_path, "rb") as f:
+        content_hash = compute_content_hash(f.read())
+    metadata["content_hash"] = content_hash
+    metadata["hash_algorithm"] = "sha256"
 
     # ── Upload vers Supabase ──────────────────────────────────────────
     try:
@@ -372,7 +450,8 @@ def _index_and_store(
         f"🗑️ Sera supprimé après indexation.\n\n"
         f"💾 **Stockage local :** `{data_abs}/`\n\n"
         f"📦 Les données sont persistées dans le fichier JSON local "
-        f"et sauvegardées dans Supabase Storage."
+        f"et sauvegardées dans Supabase Storage.\n\n"
+        f"🧬 **Hash :** `{content_hash[:16]}...`"
     )
 
     # Indexation

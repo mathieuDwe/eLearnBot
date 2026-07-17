@@ -73,11 +73,18 @@ def _verify_password(password: str, stored: str) -> bool:
 
 
 def _validate_username(username: str) -> bool:
-    """Valide le format d'un nom d'utilisateur."""
+    """Valide le format d'un nom d'utilisateur.
+
+    Rejette les noms avec :
+      - Moins de 2 ou plus de 30 caractères
+      - Caractères hors [a-zA-Z0-9_.-]
+      - Newlines, retours à la ligne, etc. (utilise \\Z pas $)
+    """
     import re
     if len(username) < 2 or len(username) > 30:
         return False
-    return re.match(r"^[a-zA-Z0-9_.-]+$", username) is not None
+    # \\Z = fin stricte de la chaîne (pas avant un \\n terminal comme $)
+    return re.match(r"^[a-zA-Z0-9_.-]+\Z", username) is not None
 
 
 # ── API publique ───────────────────────────────────────────────────────────
