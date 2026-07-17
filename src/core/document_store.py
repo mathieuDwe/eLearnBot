@@ -75,9 +75,11 @@ def _load_cache() -> list[dict]:
 
     Stratégie (lazy loading) :
       1. Si le cache mémoire est rempli → le retourne directement
-      2. Sinon, essaie de charger depuis Supabase Storage
-      3. Si Supabase indisponible → retourne une liste vide (mode dégradé)
-      4. La liste vide est aussi mise en cache (évite re-tentatives inutiles)
+      2. Sinon, essaie de charger depuis Supabase Storage (documents_index.json)
+      3. Si introuvable → tente une migration depuis l'ancien format
+         (documents_backup.json cloud ou ./data/documents.json local)
+      4. Si Supabase indisponible → retourne une liste vide (mode dégradé)
+      5. La liste vide est aussi mise en cache (évite re-tentatives inutiles)
 
     Returns:
         Liste des documents.
@@ -87,7 +89,7 @@ def _load_cache() -> list[dict]:
     if _documents_cache is not None:
         return _documents_cache
 
-    # Essayer de charger depuis le cloud
+    # Essayer de charger depuis le cloud (nouveau format)
     storage = _get_supabase_storage()
     if storage is not None:
         try:
@@ -98,7 +100,39 @@ def _load_cache() -> list[dict]:
                     _documents_cache = docs
                     return _documents_cache
         except Exception:
-            pass  # Si le fichier n'existe pas encore, on continue avec []
+            pass
+
+        # ── Migration depuis l'ancien backup cloud ────────────────────
+        # L'ancien format utilisait documents_backup.json
+        try:
+            old_data = storage.download_file("documents_backup.json")
+            if old_data:
+                docs = json.loads(old_data.decode("utf-8"))
+                if isinstance(docs, list):
+                    _documents_cache = docs
+                    # Sauvegarder au nouveau format
+                    _save_cache(docs)
+                    return _documents_cache
+        except Exception:
+            pass
+
+    # ── Migration depuis l'ancien fichier local ─────────────────────
+    # L'ancien format utilisait ./data/documents.json
+    old_local = os.path.join(
+        os.getenv("DATA_DIR", "./data"), "documents.json"
+    )
+    if os.path.exists(old_local):
+        try:
+            with open(old_local, "r", encoding="utf-8") as f:
+                docs = json.load(f)
+            if isinstance(docs, list):
+                _documents_cache = docs
+                # Sauvegarder au nouveau format cloud
+                if storage is not None:
+                    _save_cache(docs)
+                return _documents_cache
+        except Exception:
+            pass
 
     # Mode dégradé : cache mémoire vide
     _documents_cache = []
