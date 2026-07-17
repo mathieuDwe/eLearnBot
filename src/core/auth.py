@@ -284,18 +284,27 @@ def get_all_users() -> list[dict]:
         client = _get_client()
         result = (
             client.table(_TABLE)
-            .select("username, type")
+            .select("*")
             .order("username")
             .execute()
         )
         users = []
         for u in result.data:
+            # Déterminer la date de création : Supabase ajoute
+            # automatiquement created_at sur les nouvelles tables,
+            # mais les anciennes peuvent ne pas l'avoir.
+            created = u.get("created_at") or u.get("created_at") or ""
+            if isinstance(created, str):
+                created = created[:10]  # YYYY-MM-DD
+            else:
+                created = str(created)[:10] if created else ""
+
             users.append({
                 "username": u["username"],
                 "name": u["username"],   # Pas de colonne 'name'
                 "role": u["type"],
                 "type": u["type"],
-                "created_at": "",
+                "created_at": created,
             })
         return users
     except Exception as e:

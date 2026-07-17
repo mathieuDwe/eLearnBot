@@ -50,9 +50,12 @@ def show():
 
         user_counts = count_users()
         documents = get_available_documents()
+        total_chunks = sum(d.get("chunks", 0) for d in documents)
 
+        # ── Ligne 1 : Utilisateurs ──────────────────────────────────────
+        st.markdown("**👥 Utilisateurs**")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("👥 Total utilisateurs", user_counts["total"])
+        col1.metric("👥 Total", user_counts["total"])
         col2.metric(
             "👑 Administrateurs",
             user_counts["admin"],
@@ -67,12 +70,40 @@ def show():
             user_counts["eleve"],
         )
 
-        col_a, col_b = st.columns(2)
+        # ── Ligne 2 : Documents ─────────────────────────────────────────
+        st.markdown("**📚 Cours & indexation**")
+        col_a, col_b, col_c, col_d = st.columns(4)
         col_a.metric("📚 Cours indexés", len(documents))
-        col_b.metric(
-            "📝 Total chunks",
-            sum(d.get("chunks", 0) for d in documents),
+        col_b.metric("📝 Passages (chunks)", total_chunks)
+        col_c.metric(
+            "📄 Documents PDF",
+            sum(1 for d in documents if d.get("metadata", {}).get("content_type") == "pdf"),
         )
+        col_d.metric(
+            "🎬 Vidéos MP4",
+            sum(1 for d in documents if d.get("metadata", {}).get("content_type") == "mp4"),
+        )
+
+        # ── Ligne 3 : Stockage cloud ────────────────────────────────────
+        st.markdown("**☁️ Supabase Storage**")
+        try:
+            from integrations.supabase_storage import check_supabase_health
+            health = check_supabase_health()
+            col_x, col_y, col_z = st.columns(3)
+            col_x.metric(
+                "📡 Connexion",
+                "✅ OK" if health["supabase"] else "❌ KO",
+            )
+            col_y.metric(
+                "📦 Bucket `cours`",
+                "✅ OK" if health["bucket"] else "⚠️ Manquant",
+            )
+            col_z.metric(
+                "📁 Fichiers dans le bucket",
+                health.get("files_count", "?"),
+            )
+        except Exception:
+            st.caption("ℹ️ Supabase non configuré")
 
         st.markdown("---")
         st.caption(f"Dernière mise à jour : {datetime.now().strftime('%H:%M:%S')}")
@@ -130,18 +161,17 @@ def show():
             st.info("📭 Aucun utilisateur.")
         else:
             # En-tête du tableau
-            cols = st.columns([3, 2, 1.5, 1, 1])
-            cols[0].markdown("**Utilisateur**")
-            cols[1].markdown("**Identifiant**")
-            cols[2].markdown("**Rôle**")
-            cols[3].markdown("**Inscription**")
-            cols[4].markdown("**Actions**")
+            cols = st.columns([2.5, 1.5, 1.5, 1])
+            cols[0].markdown("**👤 Utilisateur**")
+            cols[1].markdown("**🎭 Rôle**")
+            cols[2].markdown("**📅 Création**")
+            cols[3].markdown("**⚙️ Actions**")
             st.divider()
 
             for u in users:
-                col1, col2, col3, col4, col5 = st.columns([3, 2, 1.5, 1, 1])
+                col1, col2, col3, col4 = st.columns([2.5, 1.5, 1.5, 1])
 
-                # Icône selon rôle
+                # Icône selon rôle + nom d'utilisateur
                 icon = {
                     "admin": "👑",
                     "professeur": "👨‍🏫",
@@ -149,12 +179,10 @@ def show():
                 }.get(u["role"], "👤")
                 col1.markdown(f"{icon} `{u['username']}`")
 
-                col2.markdown(f"`{u['username']}`")
-
                 # Sélecteur de rôle
                 current_role = u["role"]
                 role_idx = ROLES.index(current_role) if current_role in ROLES else 0
-                new_role = col3.selectbox(
+                new_role = col2.selectbox(
                     "Rôle",
                     ROLES,
                     index=role_idx,
@@ -168,12 +196,12 @@ def show():
                         st.rerun()
 
                 # Date d'inscription
-                created = u.get("created_at", "")[:10]
-                col4.markdown(created)
+                created = u.get("created_at", "")
+                col3.markdown(created if created else "—")
 
                 # Bouton supprimer
-                if u["username"] != user["username"]:  # Ne pas pouvoir se supprimer soi-même
-                    if col5.button(
+                if u["username"] != user["username"]:
+                    if col4.button(
                         "🗑️",
                         key=f"del_{u['username']}",
                         help=f"Supprimer {u['username']}",
@@ -185,7 +213,7 @@ def show():
                         else:
                             st.error(result["message"])
                 else:
-                    col5.markdown("—")
+                    col4.markdown("—")
 
             st.divider()
             st.caption(
