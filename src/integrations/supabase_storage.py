@@ -165,10 +165,15 @@ class SupabaseStorage:
         filename: str,
         content_type: str = "application/pdf",
     ) -> str:
-        """Upload des bytes vers Supabase Storage (sans fichier temporaire)."""
+        """Upload des bytes vers Supabase Storage (sans fichier temporaire).
+
+        Utilise ``io.BytesIO`` pour wrapper les bytes en file-like object,
+        garantissant la compatibilité avec toutes les versions de supabase-py.
+        """
+        import io
         self.bucket.upload(
             path=filename,
-            file=data,
+            file=io.BytesIO(data),
             file_options={"content-type": content_type},
         )
         return self.bucket.get_public_url(filename)

@@ -168,10 +168,37 @@ def sync_from_cloud():
 
     À appeler au démarrage de l'application ou après une reconnexion.
     Écrase le cache mémoire avec les données du cloud.
+    Si le cache est vide mais que des fichiers existent dans le bucket,
+    lance une ré-indexation automatique.
     """
     global _documents_cache
     _documents_cache = None  # Invalide le cache
     _load_cache()  # Recharge
+
+    # Filet de sécurité : si le cache est vide mais que Supabase
+    # a des fichiers, on tente une ré-indexation
+    if not _documents_cache and _get_supabase_storage() is not None:
+        _try_reindex_from_bucket()
+
+
+def _try_reindex_from_bucket():
+    """Reconstruit l'index depuis les fichiers du bucket si le cache est vide.
+
+    Évite les imports circulaires en utilisant une importation tardive.
+    """
+    try:
+        from core.reindexer import reindex_all
+        report = reindex_all()
+        processed = report.get("total_processed", 0)
+        if processed > 0:
+            n_ok = report.get("total_success", 0)
+            n_err = report.get("total_errors", 0)
+            print(
+                f"🔁 Auto-reindex (cache vide) : {processed} fichier(s) traité(s), "
+                f"{n_ok} OK, {n_err} erreur(s)"
+            )
+    except Exception as e:
+        print(f"⚠️ Ré-indexation automatique échouée : {e}")
 
 
 def force_in_memory_mode():
