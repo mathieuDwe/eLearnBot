@@ -185,6 +185,7 @@ if is_authenticated():
     # ── Navigation ────────────────────────────────────────────────────
     pages_config = {
         "admin": [
+            ("👑", "Admin", "admin"),
             ("🏠", "Accueil", "accueil"),
             ("👨‍🏫", "Professeur", "professeur"),
             ("👨‍🎓", "Élève", "eleve"),
