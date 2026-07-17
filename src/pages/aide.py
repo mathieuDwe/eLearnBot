@@ -2,6 +2,8 @@
 
 import streamlit as st
 
+from core.auth import get_current_user
+
 
 def show():
     """Affiche la page d'aide."""
@@ -10,6 +12,26 @@ def show():
         "Bienvenue sur l'aide d'eLearnBot. "
         "Retrouvez ici toutes les informations pour utiliser l'application."
     )
+
+    # ── Informations utilisateur connecté ───────────────────────────────
+    user = get_current_user()
+    if user:
+        role_icon = {"admin": "👑", "professeur": "👨‍🏫", "eleve": "👨‍🎓"}.get(
+            user.get("type", user["role"]), "👤"
+        )
+        user_type = user.get("type", user["role"])
+        st.markdown("---")
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            st.markdown(f"### {role_icon}")
+        with col2:
+            st.markdown(f"### {user.get('name', user['username'])}")
+            st.caption(f"@{user['username']}  ·  `{user_type}`")
+            st.caption(
+                f"Connecté depuis cette session · "
+                f"Rôle basé sur le champ `type` de la table utilisateurs"
+            )
+        st.markdown("---")
 
     # ── Questions fréquentes ───────────────────────────────────────────
     with st.expander("🤔 Qu'est-ce qu'eLearnBot ?"):
