@@ -1,7 +1,8 @@
 # 🔧 Documentation Technique — eLearnBot
 
-> Version : 1.0.0 — Juillet 2026  
-> Stack : Streamlit · Supabase · ChromaDB · sentence-transformers
+> **Version** : 1.0.0 — Juillet 2026  
+> **Stack** : Streamlit · Supabase · ChromaDB · sentence-transformers  
+> **Language** : Python 100%
 
 ---
 
@@ -17,8 +18,8 @@
 │                    STREAMLIT (main.py)                    │
 │                                                          │
 │  ┌────────────┐  ┌──────────┐  ┌──────────┐  ┌───────┐  │
-│  │ Init session│  │ Auto-login│  │Sync cloud│  │Routing│  │
-│  │ (auth.py)   │  │(session) │  │(docstore)│  │(pages)│  │
+│  │Init session│  │Auto-login│  │Sync cloud│  │Routing│  │
+│  │ (auth.py)  │  │(session) │  │(docstore)│  │(pages)│  │
 │  └────────────┘  └──────────┘  └──────────┘  └───────┘  │
 └────────────────────────┬─────────────────────────────────┘
                          │
@@ -31,7 +32,7 @@
 │             LLM dispo? ──► OUI ──► Requête LLM            │
 │                  │ NON                    │               │
 │                  ▼                        ▼               │
-│          ┌──────────────┐          Réponse + mise en cache│
+│          ┌──────────────┐          Réponse + cache       │
 │          │ Moteur non-LLM│                                │
 │          │ (9 stratégies)│                                │
 │          │    + BM25     │                                │
@@ -40,7 +41,7 @@
 │           Confiance ≥ 0.5? ──► OUI ──► Réponse sourcée    │
 │                 │ NON                                      │
 │                 ▼                                          │
-│           Fallback basique                                 │
+│           Fallback basique                                │
 └────────────────────────┬─────────────────────────────────┘
                          │
 ┌────────────────────────▼─────────────────────────────────┐
@@ -51,17 +52,16 @@
 │  │ (utilisateurs) │  │(bucket cours)│  │ (embeddings) │ │
 │  │ table: users   │  │ (PDF bruts)  │  │ collection:  │ │
 │  │ cols: username,│  │ (originaux)  │  │  elearnbot   │ │
-│  │  password,type │  └──────────────┘  └──────────────┘ │
-│  └────────────────┘                                     │
+│  │  password,type │  │ + métadonnées│  │              │ │
+│  └────────────────┘  └──────────────┘  └──────────────┘ │
 └──────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Stack Technique Détaillé
+## 2. Stack Technique
 
 ### 2.1 Frontend
-
 | Technologie | Version | Usage |
 |------------|---------|-------|
 | Streamlit | ≥ 1.28 | Interface utilisateur complète |
@@ -69,31 +69,43 @@
 | st.query_params | natif | Passage cookie → serveur |
 
 ### 2.2 Backend — Pipeline RAG
-
 | Module | Technologie | Rôle |
 |--------|------------|------|
 | `rag_pipeline.py` | Orchestrateur | Cache → LLM → non-LLM → fallback |
-| `non_llm/document_analyzer.py` | NLP offline | Extraction phrases-clés, définitions, entités, listes, formules |
+| `non_llm/document_analyzer.py` | NLP offline | Extraction phrases-clés, définitions, entités |
 | `non_llm/question_analyzer.py` | NLP offline | Classification en 11 types de questions |
-| `non_llm/retrieval.py` | BM25 (Okapi) | Recherche plein texte + phrase matching + proximité |
-| `non_llm/strategies.py` | 9 stratégies | Réponses spécialisées par type de question |
+| `non_llm/retrieval.py` | BM25 (Okapi) | Recherche plein texte + phrase matching |
+| `non_llm/strategies.py` | 9 stratégies | Réponses spécialisées par type |
 | `non_llm/engine.py` | Orchestrateur | Scoring de confiance 0.0–1.0 |
-| `document_store.py` | Supabase Storage | Stockage cloud des PDF + métadonnées |
+| `document_store.py` | Supabase Storage | Stockage cloud des PDF |
 
 ### 2.3 Base de données
-
 | Service | Technologie | Usage |
 |---------|------------|-------|
 | Supabase PostgreSQL | via `supabase-py` | Utilisateurs, rôles, métadonnées |
 | Supabase Storage | bucket `cours` | Fichiers PDF originaux |
 | ChromaDB | persistante locale | Stockage vectoriel (embeddings) |
 
-### 2.4 LLM & Embeddings
+### 2.4 Dépendances Principales
+```
+streamlit              # Interface web interactive
+PyPDF2, pdfplumber    # Extraction PDF
+groq, openai          # Clients LLM
+google-genai          # API Google Gemini
+supabase              # Client Supabase
+python-dotenv         # Configuration env
+requests              # Requêtes HTTP
+imageio-ffmpeg        # Transcription vidéo
+sentence-transformers # Embeddings locaux
+chromadb              # Vectorstore persistant
+```
 
+### 2.5 LLM & Embeddings
 | Provider | Clé API | Modèle |
 |----------|---------|--------|
 | Groq | `GROQ_API_KEY` | `llama-3.3-70b-versatile` |
 | Gemini | `GEMINI_API_KEY` | `gemini-2.0-flash` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4` (optionnel) |
 | Embeddings | — | `sentence-transformers/all-MiniLM-L6-v2` (384 dims) |
 
 ---
@@ -101,7 +113,6 @@
 ## 3. Authentification et Sessions
 
 ### 3.1 Table utilisateurs (Supabase)
-
 ```sql
 CREATE TABLE users (
   username TEXT PRIMARY KEY,
@@ -111,7 +122,6 @@ CREATE TABLE users (
 ```
 
 ### 3.2 Cookie signé HMAC-SHA256
-
 - **Nom** : `elearnbot_session`
 - **Durée** : 24 h (configurable via `SESSION_DAYS`)
 - **Clé** : `SESSION_SECRET` (ou `SUPABASE_KEY` en fallback)
@@ -122,24 +132,20 @@ payload = {
     "username": "...",
     "role": "...",
     "type": "...",
-    "exp": "2026-07-18T12:00:00"
+    "exp": "2026-07-21T12:00:00"
 }
 ```
 
 ### 3.3 Auto-login sans flash
+1. **1ʳᵉ visite** : `_cookie_attempted` absent → JS injecté + écran chargement
+2. **Si cookie valide** : Redirection auto vers `?session_token=...`
+3. **Si pas de cookie** : Affichage du formulaire login
 
-Le mécanisme évite l'affichage de la page login pour les utilisateurs avec cookie valide :
-
-1. **1ʳᵉ visite** : `_cookie_attempted` absent → JS injecté + écran de chargement + `st.rerun()`
-2. **Si cookie valide** : JS redirige vers `?session_token=...` → `try_auto_login()` → authentifié
-3. **Si pas de cookie** : le rerun affiche le formulaire de login
-
-### 3.4 Rôles et masquage
-
+### 3.4 Rôles et Permissions
 | Type | Pages accessibles | Connexions visibles |
 |------|------------------|-------------------|
 | `admin` | Toutes | ✅ Oui |
-| `professeur` | Professeur, Élève, Légifrance, Aide | ❌ Non |
+| `professeur` | Professeur, Élève, Aide | ❌ Non |
 | `eleve` | Élève, Légifrance, Aide | ❌ Non |
 
 ---
@@ -147,19 +153,17 @@ Le mécanisme évite l'affichage de la page login pour les utilisateurs avec coo
 ## 4. Moteur Q&A Sans LLM (`src/core/non_llm/`)
 
 ### 4.1 Architecture du package
-
 ```
 non_llm/
-├── __init__.py             # API publique
-├── document_analyzer.py    # Analyse hors ligne des documents
-├── question_analyzer.py    # Classification des questions
-├── retrieval.py            # Recherche BM25
-├── strategies.py           # 9 stratégies de réponse
-└── engine.py               # Orchestrateur + scoring
+├── __init__.py               # API publique
+├── document_analyzer.py      # Analyse hors ligne
+├── question_analyzer.py      # Classification
+├── retrieval.py              # Recherche BM25
+├── strategies.py             # 9 stratégies
+└── engine.py                 # Orchestrateur
 ```
 
-### 4.2 Analyseur de questions (`question_analyzer.py`)
-
+### 4.2 Classification des questions (11 types)
 | Type | Exemple |
 |------|---------|
 | `DEFINITION` | *"Qu'est-ce que la photosynthèse ?"* |
@@ -174,89 +178,61 @@ non_llm/
 | `EXAMPLE` | *"Donne un exemple de réaction chimique"* |
 | `UNKNOWN` | *"Question non classifiable"* |
 
-### 4.3 Stratégies de réponse (`strategies.py`)
-
+### 4.3 Les 9 Stratégies de réponse
 | Stratégie | Déclenchée pour | Méthode |
 |-----------|----------------|---------|
 | `answer_definition` | DEFINITION | Extraction phrase nominale + contexte |
 | `answer_factoid` | FACTOID | Top-1 BM25 + vérification entité |
-| `answer_list` | LIST | Agrégation items consécutifs |
-| `answer_comparison` | COMPARISON | Tableau comparatif 2 colonnes |
-| `answer_boolean` | BOOLEAN | Recherche présence/absence |
-| `answer_summary` | SUMMARY | Phrases-clés + premieres phrases sections |
+| `answer_list` | LIST | Agrégation items |
+| `answer_comparison` | COMPARISON | Tableau comparatif |
+| `answer_boolean` | BOOLEAN | Recherche oui/non |
+| `answer_summary` | SUMMARY | Phrases-clés + premières phrases |
 | `answer_formula` | FORMULA | Extraction motif mathématique |
 | `answer_example` | EXAMPLE | Phrase contenant "exemple" |
-| `answer_procedure` | HOW | Étapes numérotées + mots de liaison |
+| `answer_procedure` | HOW | Étapes numérotées |
 
 ### 4.4 Scoring de confiance
+Score de 0.0 à 1.0 basé sur :
+- **Présence des termes** : ratio mots trouvés
+- **Proximité** : distance entre termes
+- **Couverture** : proportion pertinente
+- **Spécificité** : rareté dans corpus
+- **Structure** : présence dans structure attendue
 
-Le moteur attribue un score de 0.0 à 1.0 basé sur :
-
-- **Présence des termes** : ratio mots de la question trouvés
-- **Proximité** : distance entre les termes dans le passage
-- **Couverture** : proportion du passage pertinent
-- **Spécificité** : rareté des termes dans le corpus
-- **Structure** : présence de la réponse dans la structure attendue
-
-Seuils : `≥ 0.5` → réponse affichée · `< 0.5` → fallback basique
-
-### 4.5 Pipeline complet
-
-```
-Question
-   │
-   ▼
-question_analyzer.classify() ──► type + mots-clés
-   │
-   ▼
-retrieval.search(query, documents)
-   │  BM25 + phrase matching + section-aware
-   ▼
-Top-5 passages avec scores
-   │
-   ▼
-stratégie correspondant au type
-   │
-   ▼
-Réponse + score de confiance
-```
+**Seuil** : `≥ 0.5` → réponse affichée · `< 0.5` → fallback
 
 ---
 
 ## 5. Stockage Cloud (`document_store.py`)
 
 ### 5.1 Architecture
-
 ```
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────┐
-│  Upload UI       │───▶│  Supabase Storage│───▶│  Cache mémoire   │
-│  (professeur.py) │    │  (bucket 'cours')│    │  (dict Python)   │
-└──────────────────┘    └──────────────────┘    └──────────────────┘
-                              │
-                              ▼
-                        ┌──────────────────┐
-                        │  Métadonnées     │
-                        │  (JSON dans le   │
-                        │   bucket aussi)  │
-                        └──────────────────┘
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+│ Upload UI    │→ │ Supabase     │→ │ Cache        │
+│(professeur)  │  │ Storage      │  │ mémoire      │
+└──────────────┘  └──────────────┘  └──────────────┘
+                        │
+                        ▼
+                  ┌──────────────┐
+                  │ Métadonnées  │
+                  │ (JSON)       │
+                  └──────────────┘
 ```
 
 ### 5.2 Modes de fonctionnement
-
 | Mode | Condition | Comportement |
 |------|-----------|-------------|
-| **Cloud** | `SUPABASE_URL` + `SUPABASE_KEY` configurés | Persistance réelle dans Supabase |
-| **Mémoire** | Supabase non configuré | Cache dictionnaire uniquement (perdu au redémarrage) |
+| **Cloud** | `SUPABASE_URL` + `SUPABASE_KEY` | Persistance réelle |
+| **Mémoire** | Supabase non configuré | Cache dict (perdu au restart) |
 
 ### 5.3 Fonctions clés
-
 | Fonction | Rôle |
 |----------|------|
 | `upload_pdf(file, filename)` | Upload + indexation |
-| `sync_from_cloud()` | Restaure le cache mémoire au démarrage |
-| `get_available_documents()` | Liste des documents indexés |
-| `count_documents()` | Nombre total de documents |
-| `is_cloud_configured()` | Vérifie si Supabase est actif |
+| `sync_from_cloud()` | Restaure cache au démarrage |
+| `get_available_documents()` | Liste indexée |
+| `count_documents()` | Total documents |
+| `is_cloud_configured()` | Vérifie Supabase |
 
 ---
 
@@ -265,40 +241,51 @@ Réponse + score de confiance
 Au démarrage, `auto_reindex_on_startup()` :
 
 1. Vérifie la date de dernière vérification
-2. Si > 24 h → liste les fichiers dans Supabase Storage
+2. Si > 24 h → liste fichiers dans Supabase Storage
 3. Compare avec l'index ChromaDB
-4. Ré-indexe les nouveaux fichiers ou modifiés
-5. Met à jour le cache mémoire
-6. Retourne un rapport (nouveaux, mis à jour, erreurs)
+4. Ré-indexe nouveaux ou modifiés
+5. Met à jour cache mémoire
+6. Retourne un rapport
 
 ---
 
-## 7. Tests
-
-### 7.1 Structure
+## 7. Structure du Projet
 
 ```
-tests/
-├── unit/
-│   └── test_non_llm_qa.py       # 67 tests — moteur non-LLM
-├── integration/
-│   ├── test_complex_questions.py # 62 tests — corpus multi-matières
-│   └── test_legal_questions.py   # 60 tests — corpus juridique
-├── regression/
-│   ├── test_edge_cases.py       # Tests réindexeur, cas limites
-│   └── test_security.py         # Tests token, cookie, rôles
-└── functional/
-    └── test_workflows.py        # Tests parcours complets
-```
-
-**Total : 307 tests**
-
-### 7.2 Lancer les tests
-
-```bash
-pytest tests/                          # Tout
-pytest tests/ -q --tb=short            # Mode silencieux
-pytest tests/unit/test_non_llm_qa.py -v -k "test_strategy"  # Filtre
+eLearnBot/
+├── src/
+│   ├── main.py                  # 🚀 Point d'entrée
+│   ├── core/
+│   │   ├── auth.py              # 🔐 Authentification
+│   │   ├── session.py           # 🍪 Cookies HMAC
+│   │   ├── document_store.py    # ☁️ Supabase
+│   │   ├── rag_pipeline.py      # 🔄 Pipeline
+│   │   ├── reindexer.py         # 🔁 Ré-indexation
+│   │   └── non_llm/             # 🧠 Moteur Q&A
+│   │       ├── document_analyzer.py
+│   │       ├── question_analyzer.py
+│   │       ├── retrieval.py
+│   │       ├── strategies.py
+│   │       └── engine.py
+│   ├── pages/
+│   │   ├── accueil.py           # 🏠 Accueil
+│   │   ├── professeur.py        # 👨‍🏫 Professeur
+│   │   ├── eleve.py             # 👨‍🎓 Élève
+│   │   ├── legifrance.py        # ⚖️ Juridique
+│   │   └── aide.py              # ❓ Aide
+│   └── integrations/
+│       └── supabase_storage.py  # ☁️ Client Supabase
+│
+├── tests/                        # 🧪 307 tests
+│   ├── unit/
+│   ├── integration/
+│   ├── regression/
+│   └── functional/
+│
+├── DOCUMENTATION_TECHNIQUE.md   # 🔧 Docs
+├── README.md                    # 📖 Guide
+├── requirements.txt             # 📦 Dépendances
+└── .env.example                 # ⚙️ Config
 ```
 
 ---
@@ -312,56 +299,80 @@ pytest tests/unit/test_non_llm_qa.py -v -k "test_strategy"  # Filtre
 | `SESSION_SECRET` | Non | `SUPABASE_KEY` | Clé HMAC pour cookie |
 | `GROQ_API_KEY` | Non | — | Clé API Groq |
 | `GEMINI_API_KEY` | Non | — | Clé API Gemini |
-| `ADMIN_SECRET_CODE` | Non | `admin123` | Code pour créer un admin |
+| `OPENAI_API_KEY` | Non | — | Clé API OpenAI |
+| `ADMIN_SECRET_CODE` | Non | `admin123` | Code création admin |
 
-*\* Requis pour la persistance cloud — sans, le mode mémoire est utilisé*
+*Requis pour persistance cloud — sans, mode mémoire utilisé*
 
 ---
 
 ## 9. Sécurité
 
-- **Cookie** : signé HMAC-SHA256, clé séparée (`SESSION_SECRET`)
-- **Mots de passe** : hashés SHA-256 (avec fallback bcrypt)
-- **Rôles** : vérification côté serveur à chaque accès
-- **Supabase** : clé stockée en variable d'environnement, jamais commitée
-- **Bucket Storage** : en mode public pour la lecture Streamlit
-- **Session** : nettoyée au logout (`clear_session_cookie` + suppression des clés)
+- **Cookie** : signé HMAC-SHA256, clé séparée
+- **Mots de passe** : hashés SHA-256
+- **Rôles** : vérification serveur à chaque accès
+- **Supabase** : clé env, jamais commitée
+- **Storage** : public pour lecture Streamlit
+- **Session** : nettoyage au logout
 
 ---
 
 ## 10. Déploiement
 
 ### 10.1 Local
-
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # Éditer avec vos clés
+cp .env.example .env
 streamlit run src/main.py
 ```
 
 ### 10.2 Streamlit Cloud
-
 1. Push sur GitHub
 2. Connecter sur [share.streamlit.io](https://share.streamlit.io)
-3. Définir les secrets (`SUPABASE_URL`, `SUPABASE_KEY`, `SESSION_SECRET`, clés LLM)
+3. Définir secrets (`SUPABASE_URL`, `SUPABASE_KEY`, etc.)
 4. Déployer
-
-> Le bucket Supabase Storage (`cours`) doit être créé manuellement avant le premier upload.
 
 ---
 
-## 11. Limitations Techniques
+## 11. Tests
+
+### 11.1 Exécution
+```bash
+pytest tests/                   # Tout
+pytest tests/ -q --tb=short     # Silencieux
+pytest tests/unit/ -v           # Unitaires
+pytest tests/integration/ -v    # Intégration
+```
+
+### 11.2 Couverture
+- **307 tests** : unitaires, intégration, régression, sécurité, fonctionnels
+
+---
+
+## 12. Limitations Connues
 
 | Limitation | Cause | Solution future |
 |------------|-------|-----------------|
 | Pas d'OCR | Coût technique | Intégration Tesseract |
 | PDF 10 Mo max | Limite Streamlit | Upload par chunk |
 | 30 req/min Groq | Rate limit gratuit | Cache + file d'attente |
-| ChromaDB mono-instance | Architecture simple | Passage à Qdrant/Pinecone |
-| Transcription lente | Whisper local | API Whisper distante |
+| ChromaDB mono-instance | Architecture simple | Qdrant/Pinecone |
+| Transcription lente | Whisper local | Whisper distante |
 
 ---
 
-*Documentation générée pour eLearnBot v1.0.0*
+## 13. Roadmap Future
+
+- [ ] Support OCR pour PDFs scannés
+- [ ] Chunking intelligent pour gros fichiers
+- [ ] Queue système pour requêtes LLM
+- [ ] Passage à Qdrant/Pinecone
+- [ ] API REST publique
+- [ ] Support multilingue
+
+---
+
+*Documentation mise à jour : 21 Juillet 2026*
+*eLearnBot v1.0.0*
